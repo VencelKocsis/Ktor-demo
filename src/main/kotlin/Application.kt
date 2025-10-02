@@ -25,8 +25,7 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-
-// ----- DTO-k -----
+import io.ktor.server.http.content.* // ----- DTO-k -----
 @Serializable
 data class PlayerDTO(val id: Int, val name: String, val age: Int?)
 
@@ -39,11 +38,11 @@ data class NewPlayerDTO(val name: String, val age: Int?)
 @JsonClassDiscriminator("type")
 sealed class WsEvent {
     @Serializable
-    @SerialName("PlayerAdded") // Ez megmondja a Ktor-nak, hogy csak "PlayerAdded"-et küldjön
+    @SerialName("PlayerAdded")
     data class PlayerAdded(val player: PlayerDTO) : WsEvent()
 
     @Serializable
-    @SerialName("PlayerDeleted") // Ez megmondja a Ktor-nak, hogy csak "PlayerDeleted"-et küldjön
+    @SerialName("PlayerDeleted")
     data class PlayerDeleted(val id: Int) : WsEvent()
 }
 
@@ -92,7 +91,7 @@ fun Application.module(db: Database) {
     }
 
     val clients = mutableListOf<DefaultWebSocketServerSession>()
-    var serializersModule = SerializersModule {
+    val serializersModule = SerializersModule {
         polymorphic(WsEvent::class) {
             subclass(WsEvent.PlayerAdded::class, WsEvent.PlayerAdded.serializer())
             subclass(WsEvent.PlayerDeleted::class, WsEvent.PlayerDeleted.serializer())
@@ -100,9 +99,8 @@ fun Application.module(db: Database) {
     }
 
     val json = Json {
-        classDiscriminator = "type"    // a discriminator mező neve
+        classDiscriminator = "type"
         encodeDefaults = true
-        serializersModule = serializersModule
     }
 
     routing {
@@ -129,7 +127,6 @@ fun Application.module(db: Database) {
             val event = WsEvent.PlayerAdded(player)
             val message = json.encodeToString(WsEvent.serializer(), event)
 
-            // <<< ADD EZT A LOG SORT! >>>
             println("DEBUG: Broadcasting PlayerAdded for ID $id to ${clients.size} clients.")
 
             clients.forEach { session ->
@@ -165,6 +162,11 @@ fun Application.module(db: Database) {
             } finally {
                 clients.remove(this)
             }
+        }
+
+        // Statikus fájlok kiszolgálása
+        staticResources("/", "static") {
+            default("admin_dashboard.html")
         }
     }
 }

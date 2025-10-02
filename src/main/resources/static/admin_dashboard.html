@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Játékos Adminisztráció</title>
+    <!-- Tailwind CSS betöltése -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Egyedi stílusok */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .container-box {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            max-width: 900px;
+        }
+        .table-header {
+            background-color: #4f46e5;
+            color: white;
+        }
+    </style>
+    <script>
+        // --- JÁTÉKOS ADAT MODELL ---
+
+        // JAVÍTÁS: Mivel az adminisztrációs felület ugyanarról a szerverről fut, mint az API,
+        // használhatunk relatív útvonalat.
+        // Ha a Ktor applikáció portja 8080, akkor a böngésző fogja a http://localhost:8080-at hozzáadni.
+        const BACKEND_API_URL = "/players";
+
+        /**
+         * Inicializálás: Betölti a játékoslistát a backend API-ról.
+         */
+        async function fetchPlayers() {
+            // Mielőtt elkezdünk aszinkron műveleteket végezni, biztosítjuk, hogy a DOM elemek
+            // már léteznek, és kezeljük, ha nincsenek.
+            const statusEl = document.getElementById('status');
+            const playerTableBodyEl = document.getElementById('playerTableBody');
+
+            if (!statusEl || !playerTableBodyEl) {
+                console.error("DOM elemek hiányoznak, leállítom a betöltést.");
+                return;
+            }
+
+            statusEl.textContent = 'Betöltés...';
+            statusEl.className = 'text-center text-blue-600 my-4';
+            playerTableBodyEl.innerHTML = '';
+
+            try {
+                // A fetch most már /api/players címre megy, ami ugyanazon a hoston fut
+                const response = await fetch(BACKEND_API_URL);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP hiba: ${response.status} (${response.statusText})`);
+                }
+
+                const players = await response.json();
+                renderPlayers(players);
+                statusEl.textContent = `Sikeresen betöltve: ${players.length} játékos.`;
+                statusEl.className = 'text-center text-green-600 my-4';
+
+            } catch (error) {
+                console.error("Hiba az adatok lekérdezésekor:", error);
+                statusEl.textContent = `Hiba a szerverrel való kommunikáció során: ${error.message}. Ellenőrizze az API elérhetőségét.`;
+                statusEl.className = 'text-center text-red-600 my-4 font-bold';
+                // Ha hiba van, a playerListEl-t is újra kell keresni, ha korábban nem volt elmentve globálisan
+                const playerListEl = document.getElementById('playerList');
+                if (playerListEl) playerListEl.innerHTML = '';
+            }
+        }
+
+        /**
+         * Megjeleníti a játékosadatokat a táblázatban.
+         * @param {Array<Object>} players - A játékosokat tartalmazó tömb.
+         */
+        function renderPlayers(players) {
+            const playerTableBodyEl = document.getElementById('playerTableBody');
+            if (!playerTableBodyEl) return;
+
+            playerTableBodyEl.innerHTML = ''; // Előző tartalom törlése
+
+            if (players.length === 0) {
+                playerTableBodyEl.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-gray-500">Nincsenek adatok az adatbázisban.</td></tr>';
+                return;
+            }
+
+            players.forEach(player => {
+                const row = playerTableBodyEl.insertRow();
+                row.className = 'border-b hover:bg-indigo-50 transition duration-150';
+
+                // ID
+                let cell = row.insertCell();
+                cell.textContent = player.id;
+                cell.className = 'py-3 px-6 font-medium text-gray-900';
+
+                // Név
+                cell = row.insertCell();
+                cell.textContent = player.name || 'N/A';
+                cell.className = 'py-3 px-6 text-gray-700';
+
+                // Életkor
+                cell = row.insertCell();
+                cell.textContent = player.age != null ? player.age : 'N/A';
+                cell.className = 'py-3 px-6 text-gray-700';
+
+                // Műveletek (a következő lépéshez)
+                cell = row.insertCell();
+                cell.className = 'py-3 px-6 flex space-x-2 justify-center';
+                cell.innerHTML = `
+                    <button onclick="alert('Módosítás funkció még nincs beépítve!')" class="bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-1 px-3 rounded-md transition duration-150 text-sm">
+                        Szerkesztés
+                    </button>
+                    <button onclick="alert('Törlés funkció még nincs beépítve!')" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-1 px-3 rounded-md transition duration-150 text-sm">
+                        Törlés
+                    </button>
+                `;
+            });
+        }
+
+        // Amikor az oldal betöltődik, automatikusan töltse be az adatokat
+        window.onload = fetchPlayers;
+
+    </script>
+</head>
+<body class="p-4 md:p-8">
+
+<div class="container-box mx-auto bg-white p-6 md:p-10 rounded-xl">
+    <header class="mb-8 border-b pb-4">
+        <h1 class="text-3xl font-extrabold text-indigo-700">Rendszer Adminisztrációs Felület</h1>
+        <p class="text-gray-500 mt-1">Játékos adatok kezelése a Docker konténerben futó backend segítségével.</p>
+    </header>
+
+    <!-- Státusz üzenetek -->
+    <div id="status" class="text-center text-gray-500 my-4">Az oldal betöltődik...</div>
+
+    <!-- Műveletek (A LÉTREHOZÁS FÁZISHOZ) -->
+    <div class="flex justify-end mb-6">
+        <button onclick="alert('Létrehozás funkció még nincs beépítve!')"
+                class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-md">
+            Új játékos hozzáadása
+        </button>
+        <button onclick="fetchPlayers()"
+                class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-md ml-3">
+            Adatok frissítése
+        </button>
+    </div>
+
+    <!-- Játékoslista megjelenítése -->
+    <section id="playerList" class="overflow-x-auto rounded-lg border border-gray-200">
+        <h2 class="text-xl font-semibold p-4 bg-gray-50 text-gray-700 border-b">Játékosok listája</h2>
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="table-header">
+            <tr>
+                <th class="py-3 px-6 text-left text-sm font-semibold uppercase tracking-wider">ID</th>
+                <th class="py-3 px-6 text-left text-sm font-semibold uppercase tracking-wider">Név</th>
+                <th class="py-3 px-6 text-left text-sm font-semibold uppercase tracking-wider">Életkor</th>
+                <th class="py-3 px-6 text-center text-sm font-semibold uppercase tracking-wider">Műveletek</th>
+            </tr>
+            </thead>
+            <tbody id="playerTableBody" class="bg-white divide-y divide-gray-200">
+            <!-- A játékos adatok ide kerülnek JS-sel -->
+            </tbody>
+        </table>
+    </section>
+
+</div>
+
+</body>
+</html>
