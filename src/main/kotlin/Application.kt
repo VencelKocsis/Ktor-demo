@@ -17,6 +17,7 @@ import io.ktor.serialization.kotlinx.json.*
 import java.time.Duration
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import io.ktor.http.HttpStatusCode
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.modules.SerializersModule
@@ -44,6 +45,10 @@ sealed class WsEvent {
     @Serializable
     @SerialName("PlayerDeleted")
     data class PlayerDeleted(val id: Int) : WsEvent()
+
+    @Serializable
+    @SerialName("PlayerUpdated")
+    data class PlayerUpdated(val player: PlayerDTO) : WsEvent()
 }
 
 // ----- Exposed táblák -----
@@ -95,6 +100,7 @@ fun Application.module(db: Database) {
         polymorphic(WsEvent::class) {
             subclass(WsEvent.PlayerAdded::class, WsEvent.PlayerAdded.serializer())
             subclass(WsEvent.PlayerDeleted::class, WsEvent.PlayerDeleted.serializer())
+            subclass(WsEvent.PlayerUpdated::class, WsEvent.PlayerUpdated.serializer())
         }
     }
 
@@ -104,6 +110,7 @@ fun Application.module(db: Database) {
     }
 
     routing {
+        // GET /players
         get("/players") {
             val players = transaction(db) {
                 Players.selectAll().map {
@@ -113,6 +120,7 @@ fun Application.module(db: Database) {
             call.respond(players)
         }
 
+        // POST /players
         post("/players") {
             val newPlayer = call.receive<NewPlayerDTO>()
             val id = transaction(db) {
@@ -136,6 +144,7 @@ fun Application.module(db: Database) {
             call.respond(player)
         }
 
+        // DELETE /players/{id}
         delete("/players/{id}") {
             val id = call.parameters["id"]?.toIntOrNull()
             if (id != null) {
@@ -148,9 +157,47 @@ fun Application.module(db: Database) {
                 val message = json.encodeToString(WsEvent.serializer(), event)
                 clients.forEach { session -> session.send(message) }
 
-                call.respond(mapOf("status" to "deleted"))
+                call.respond(HttpStatusCode.OK, mapOf("status" to "deleted"))
             } else {
-                call.respondText("Invalid id")
+                call.respondText("Invalid id", status = HttpStatusCode.BadRequest)
+            }
+        }
+
+        // PUT /players/{id}
+        put("/players/{id}") {
+            val id = call.parameters["id"]?.toIntOrNull() ?: run {
+                call.respondText("Invalid id", status = HttpStatusCode.BadRequest)
+                return@put
+            }
+
+            val updatedPlayerDTO = try {
+                call.receive<NewPlayerDTO>()
+            } catch (e: Exception) {
+                call.respondText("Invalid request body", status = HttpStatusCode.BadRequest)
+                return@put
+            }
+
+            val updatedCount = transaction(db) {
+                Players.update({ Players.id eq id }) {
+                    it[name] = updatedPlayerDTO.name
+                    it[age] = updatedPlayerDTO.age
+                }
+            }
+
+            if (updatedCount > 0) {
+                val updatedPlayer = PlayerDTO(id, updatedPlayerDTO.name, updatedPlayerDTO.age)
+                val event = WsEvent.PlayerUpdated(updatedPlayer)
+                val message = json.encodeToString(WsEvent.serializer(), event)
+
+                println("DEBUG: Broadcasting PlayerUpdated for ID $id to ${clients.size} clients.")
+
+                clients.forEach { session ->
+                    session.send(message)
+                }
+
+                call.respond(HttpStatusCode.OK, updatedPlayer)
+            } else {
+                call.respondText("Player not found", status = HttpStatusCode.NotFound)
             }
         }
 

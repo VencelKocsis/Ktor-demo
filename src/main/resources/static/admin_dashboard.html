@@ -30,6 +30,7 @@
         let ws;
         // Globális lista az adatok tárolására, amit a WS események frissítenek
         let playersData = [];
+        let editingPlayer = null;
 
         /**
          * Inicializálás: Betölti a játékoslistát és elindítja a WebSocket kapcsolatot.
@@ -90,6 +91,16 @@
                     playersData = playersData.filter(p => p.id !== eventData.id);
                     // Kiírjuk a törlés tényét
                     document.getElementById('status').textContent = `Játékos ${eventData.id} törölve a WS-en keresztül.`;
+                    document.getElementById('status').className = 'text-center text-orange-600 my-4';
+                    break;
+
+                case 'PlayerUpdated':
+                    const updatedPlayer = eventData.player;
+                    // Megkeressük a régi játékost a listában és lecseréljük
+                    playersData = playersData.map(p =>
+                        p.id === updatedPlayer.id ? updatedPlayer : p
+                    );
+                    document.getElementById('status').textContent = `Játékos ${updatedPlayer.id} frissítve a WS-en keresztül.`;
                     document.getElementById('status').className = 'text-center text-orange-600 my-4';
                     break;
 
@@ -237,6 +248,89 @@
         }
 
         /**
+ * Megnyitja a szerkesztő modalt és feltölti az űrlapot a játékos adataival.
+ */
+function handleEdit(player) {
+    editingPlayer = player; // Mentjük az aktuális játékos adatait
+    document.getElementById('editPlayerId').value = player.id;
+    document.getElementById('editPlayerName').value = player.name;
+    document.getElementById('editPlayerAge').value = player.age != null ? player.age : '';
+
+    // Megjelenítjük a modalt
+    const modal = document.getElementById('editModal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+
+/**
+ * Bezárja a szerkesztő modalt.
+ */
+function closeEditModal() {
+    editingPlayer = null; // Töröljük a szerkesztett játékos állapotát
+    const modal = document.getElementById('editModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+    document.getElementById('status').textContent = ''; // Töröljük az esetleges hibákat
+}
+
+/**
+ * Elküldi a szerkesztett adatokat a szerverre (HTTP PUT).
+ */
+async function saveEdit(event) {
+    event.preventDefault();
+
+    if (!editingPlayer) return; // Védelmi mechanizmus: ha nincs játékos, kilép
+
+    const statusEl = document.getElementById('status');
+    const nameInput = document.getElementById('editPlayerName').value.trim();
+    const ageInput = document.getElementById('editPlayerAge').value.trim();
+    const playerId = editingPlayer.id; // ID kinyerése a tárolt objektumból
+
+    if (nameInput === "") {
+        statusEl.textContent = "A név nem lehet üres a szerkesztés során!";
+        statusEl.className = 'text-center text-red-500 my-4';
+        return;
+    }
+
+    const age = ageInput === "" ? null : parseInt(ageInput, 10);
+
+    const updatedPlayerDTO = {
+        name: nameInput,
+        age: age
+    };
+
+    const putUrl = `${BACKEND_API_URL}/${playerId}`;
+
+    statusEl.textContent = `Játékos ${playerId} frissítése...`;
+    statusEl.className = 'text-center text-blue-600 my-4';
+
+    try {
+        const response = await fetch(putUrl, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(updatedPlayerDTO)
+        });
+
+        if (!response.ok) {
+            const errorBody = await response.text();
+            throw new Error(`HTTP hiba: ${response.status} (${response.statusText}). Válasz: ${errorBody}`);
+        }
+
+        closeEditModal(); // Bezárjuk a modalt
+        // A WS esemény (PlayerUpdated) fogja frissíteni a listát!
+        statusEl.textContent = `Játékos ${playerId} sikeresen frissítve. (WS frissíti a listát)`;
+        statusEl.className = 'text-center text-green-600 my-4 font-bold';
+
+    } catch (error) {
+        console.error("Hiba a játékos frissítése során:", error);
+        statusEl.textContent = `Hiba a frissítés során: ${error.message}`;
+        statusEl.className = 'text-center text-red-600 my-4 font-bold';
+    }
+}
+
+        /**
          * Megjeleníti a játékosadatokat a táblázatban a globális playersData lista alapján.
          * @param {Array<Object>} players - A játékosokat tartalmazó tömb.
          */
@@ -277,7 +371,7 @@
                 cell = row.insertCell();
                 cell.className = 'py-3 px-6 flex space-x-2 justify-center';
                 cell.innerHTML = `
-                    <button onclick="alert('A Szerkesztés funkció még hiányzik!')" class="bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-1 px-3 rounded-md transition duration-150 text-sm">
+                    <button onclick="handleEdit(${JSON.stringify(player).replace(/"/g, '&quot;')})" class="bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-1 px-3 rounded-md transition duration-150 text-sm">
                         Szerkesztés
                     </button>
                     <button onclick="deletePlayer(${player.id})" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-1 px-3 rounded-md transition duration-150 text-sm">
@@ -359,6 +453,40 @@
         </table>
     </section>
 
+</div>
+
+<!-- Szerkesztő Modal (Felugró Ablak) -->
+<div id="editModal" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden items-center justify-center p-4 transition-opacity duration-300">
+    <div class="bg-white rounded-lg shadow-2xl w-full max-w-md p-6 transform scale-100 transition-transform duration-300">
+        <h3 class="text-2xl font-bold mb-4 text-indigo-700">Játékos szerkesztése</h3>
+        <form id="editPlayerForm" onsubmit="saveEdit(event)" class="space-y-4">
+            <!-- Rejtett ID mező a mentéshez -->
+            <input type="hidden" id="editPlayerId" name="id">
+
+            <div>
+                <label for="editPlayerName" class="block text-sm font-medium text-gray-700">Név*</label>
+                <input type="text" id="editPlayerName" name="playerName" required
+                       class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+            </div>
+
+            <div>
+                <label for="editPlayerAge" class="block text-sm font-medium text-gray-700">Életkor (Opcionális)</label>
+                <input type="number" id="editPlayerAge" name="playerAge" min="1" max="150"
+                       class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+            </div>
+
+            <div class="flex justify-end space-x-3 pt-2">
+                <button type="button" onclick="closeEditModal()"
+                        class="bg-gray-400 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                    Mégse
+                </button>
+                <button type="submit"
+                        class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-md">
+                    Mentés
+                </button>
+            </div>
+        </form>
+    </div>
 </div>
 
 </body>
