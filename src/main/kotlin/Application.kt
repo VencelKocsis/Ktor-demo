@@ -61,13 +61,20 @@ object Players : Table("players") {
 
 // ----- DB init -----
 fun initDataSource(): HikariDataSource {
+    val dbUrl = System.getenv("DB_URL") ?: "jdbc:postgresql://localhost:5432/demo"
+    val dbUser = System.getenv("DB_USER") ?: "demo"
+    val dbPassword = System.getenv("DB_PASSWORD") ?: "demo"
+
     val cfg = HikariConfig().apply {
-        jdbcUrl = System.getenv("DB_URL") ?: "jdbc:postgresql://localhost:5432/demo"
-        username = System.getenv("DB_USER") ?: "demo"
-        password = System.getenv("DB_PASSWORD") ?: "demo"
+        jdbcUrl = dbUrl
+        username = dbUser
+        password = dbPassword
         driverClassName = "org.postgresql.Driver"
         maximumPoolSize = 3
+        isAutoCommit = false
+        transactionIsolation = "TRANSACTION_REPEATABLE_READ"
     }
+
     return HikariDataSource(cfg)
 }
 
