@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: ktor-demo
+    env: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
