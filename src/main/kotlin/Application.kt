@@ -62,7 +62,7 @@ object Players : Table("players") {
 // ----- DB init -----
 fun initDataSource(): HikariDataSource {
     val cfg = HikariConfig().apply {
-        jdbcUrl = System.getenv("JDBC_DATABASE_URL") ?: "jdbc:postgresql://localhost:5432/demo"
+        jdbcUrl = System.getenv("DB_URL") ?: "jdbc:postgresql://localhost:5432/demo"
         username = System.getenv("DB_USER") ?: "demo"
         password = System.getenv("DB_PASSWORD") ?: "demo"
         driverClassName = "org.postgresql.Driver"
