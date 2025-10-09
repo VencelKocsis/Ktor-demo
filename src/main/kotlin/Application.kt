@@ -98,8 +98,10 @@ fun main() {
 fun Application.module(db: Database) {
     install(ContentNegotiation) { json() }
     install(WebSockets) {
-        pingPeriod = Duration.ofSeconds(15)
-        timeout = Duration.ofSeconds(30)
+        pingPeriod = Duration.ofSeconds(10)
+        timeout = Duration.ofSeconds(60)
+        maxFrameSize = Long.MAX_VALUE
+        masking = false
     }
 
     val clients = mutableListOf<DefaultWebSocketServerSession>()
