@@ -24,7 +24,10 @@
     <script>
         // --- KONSTANS ---
         const BACKEND_API_URL = "/players";
-        const WEBSOCKET_URL = "ws://localhost:8080/ws/players";
+    const WEBSOCKET_URL =
+    (window.location.protocol === "https:" ? "wss://" : "ws://") +
+    window.location.host + "/ws/players";
+
 
         // Globális WebSocket objektum a kapcsolat kezeléséhez
         let ws;
@@ -125,6 +128,15 @@
                 console.log("WebSocket kapcsolat létrejött.");
                 document.getElementById('wsStatus').textContent = 'Csatlakozva';
                 document.getElementById('wsStatus').className = 'inline-flex items-center rounded-full bg-green-100 px-3 py-0.5 text-sm font-medium text-green-800';
+
+                wsPingInterval = setInterval(() => {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        // Küldhetünk egy egyszerű JSON pinget, ha a Ktor beállítása igényli,
+                        // de a Ktor/Netty beépített Ping/Pong mechanizmusa a legjobb.
+                        // Maradjunk a kért JSON küldésnél, ha az a biztos.
+                        ws.send(JSON.stringify({ type: "ping" }));
+                    }
+                }, 30000); // 30 másodpercenként
             };
 
             ws.onmessage = (event) => {
