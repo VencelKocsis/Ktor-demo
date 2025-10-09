@@ -26,7 +26,9 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import io.ktor.server.http.content.* // ----- DTO-k -----
+import io.ktor.server.http.content.*
+
+// ----- DTO-k -----
 @Serializable
 data class PlayerDTO(val id: Int, val name: String, val age: Int?)
 
@@ -121,17 +123,21 @@ fun Application.module(db: Database) {
     routing {
         // GET /players
         get("/players") {
+            println("INFO: Processing GET /players request.") // DEBUG LOG
             val players = transaction(db) {
                 Players.selectAll().map {
                     PlayerDTO(it[Players.id], it[Players.name], it[Players.age])
                 }
             }
+            println("INFO: Found ${players.size} players. Responding to client.") // DEBUG LOG
             call.respond(players)
         }
 
         // POST /players
         post("/players") {
             val newPlayer = call.receive<NewPlayerDTO>()
+            println("INFO: Processing POST /players request. Player: ${newPlayer.name}") // DEBUG LOG
+
             val id = transaction(db) {
                 Players.insert {
                     it[name] = newPlayer.name
@@ -156,18 +162,26 @@ fun Application.module(db: Database) {
         // DELETE /players/{id}
         delete("/players/{id}") {
             val id = call.parameters["id"]?.toIntOrNull()
+            println("INFO: Processing DELETE /players/${id} request.") // DEBUG LOG
+
             if (id != null) {
-                transaction(db) {
+                val deletedCount = transaction(db) { // Ellenőrizzük, hány sor törlődött
                     Players.deleteWhere { Players.id eq id }
                 }
 
-                // broadcast
-                val event = WsEvent.PlayerDeleted(id)
-                val message = json.encodeToString(WsEvent.serializer(), event)
-                clients.forEach { session -> session.send(message) }
-
-                call.respond(HttpStatusCode.OK, mapOf("status" to "deleted"))
+                if (deletedCount > 0) {
+                    // broadcast
+                    val event = WsEvent.PlayerDeleted(id)
+                    val message = json.encodeToString(WsEvent.serializer(), event)
+                    clients.forEach { session -> session.send(message) }
+                    println("DEBUG: Successfully deleted player ID $id. Broadcasting PlayerDeleted to ${clients.size} clients.") // DEBUG LOG
+                    call.respond(HttpStatusCode.OK, mapOf("status" to "deleted"))
+                } else {
+                    println("WARNING: Delete failed. Player ID $id not found.") // DEBUG LOG
+                    call.respondText("Player not found", status = HttpStatusCode.NotFound)
+                }
             } else {
+                println("WARNING: Invalid ID received for delete.") // DEBUG LOG
                 call.respondText("Invalid id", status = HttpStatusCode.BadRequest)
             }
         }
@@ -176,6 +190,7 @@ fun Application.module(db: Database) {
         put("/players/{id}") {
             val id = call.parameters["id"]?.toIntOrNull() ?: run {
                 call.respondText("Invalid id", status = HttpStatusCode.BadRequest)
+                println("WARNING: Invalid ID received for update.") // DEBUG LOG
                 return@put
             }
 
@@ -183,8 +198,11 @@ fun Application.module(db: Database) {
                 call.receive<NewPlayerDTO>()
             } catch (e: Exception) {
                 call.respondText("Invalid request body", status = HttpStatusCode.BadRequest)
+                println("ERROR: Invalid request body for update ID $id. Error: ${e.message}") // DEBUG LOG
                 return@put
             }
+
+            println("INFO: Processing PUT /players/$id request. New data: Name=${updatedPlayerDTO.name}") // DEBUG LOG
 
             val updatedCount = transaction(db) {
                 Players.update({ Players.id eq id }) {
@@ -207,16 +225,21 @@ fun Application.module(db: Database) {
                 call.respond(HttpStatusCode.OK, updatedPlayer)
             } else {
                 call.respondText("Player not found", status = HttpStatusCode.NotFound)
+                println("WARNING: Update failed. Player ID $id not found in DB.") // DEBUG LOG
             }
         }
 
         // WebSocket endpoint
         webSocket("/ws/players") {
+            println("INFO: New WebSocket client connected. Current clients: ${clients.size + 1}") // DEBUG LOG
             clients.add(this)
             try {
-                incoming.consumeEach { /* szerver csak küld */ }
+                incoming.consumeEach {
+                    // Itt lehetne kezelni a bejövő üzeneteket, pl. a keep-alive pingeket
+                }
             } finally {
                 clients.remove(this)
+                println("INFO: WebSocket client disconnected. Remaining clients: ${clients.size}") // DEBUG LOG
             }
         }
 
