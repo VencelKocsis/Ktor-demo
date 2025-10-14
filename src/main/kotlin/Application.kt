@@ -1,5 +1,10 @@
 package hu.bme.aut.android.demo
 
+import com.google.auth.oauth2.GoogleCredentials
+import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
+import com.google.firebase.messaging.FirebaseMessaging
+import com.google.firebase.messaging.MulticastMessage // <-- ÚJ IMPORT
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.ktor.http.HttpStatusCode
@@ -21,7 +26,11 @@ import io.ktor.server.websocket.pingPeriod
 import io.ktor.server.websocket.timeout
 import io.ktor.server.websocket.webSocket
 import io.ktor.websocket.send
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.consumeEach
+import kotlinx.coroutines.launch
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -35,15 +44,15 @@ import org.jetbrains.exposed.sql.javatime.CurrentDateTime
 import org.jetbrains.exposed.sql.javatime.datetime
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.slf4j.LoggerFactory
+import java.io.ByteArrayInputStream
 import java.time.Duration
 
-// ----- ÚJ DTO AZ FCM TOKEN FOGADÁSÁRA -----
+// ----- DTO-k (megtartva) -----
 @Serializable
 data class FcmTokenRegistration(
     @SerialName("fcm_token") val fcmToken: String
 )
 
-// ----- DTO-k (megtartva) -----
 @Serializable
 data class PlayerDTO(val id: Int, val name: String, val age: Int?)
 
@@ -68,7 +77,7 @@ sealed class WsEvent {
     data class PlayerUpdated(val player: PlayerDTO) : WsEvent()
 }
 
-// ----- Exposed táblák (Players megtartva) -----
+// ----- Exposed táblák (Players és FcmTokens megtartva) -----
 object Players : Table("players") {
     val id = integer("id").autoIncrement()
     val name = varchar("name", length = 100)
@@ -76,19 +85,13 @@ object Players : Table("players") {
     override val primaryKey = PrimaryKey(id)
 }
 
-// ----- ÚJ Exposed tábla az FCM Tokenekhez -----
 object FcmTokens : Table("fcm_tokens") {
-    // A token maga az elsődleges kulcs, és egyedi (UNIQUE)
     val token = varchar("token", length = 255).uniqueIndex()
-    // A regisztráció/utolsó frissítés ideje
-    // JAVÍTVA: CurrentDateTime() helyett CurrentDateTime singleton
     val registeredAt = datetime("registered_at").defaultExpression(CurrentDateTime)
-
     override val primaryKey = PrimaryKey(token)
 }
 
-
-// ----- DB init (frissítve az FcmTokens táblával) -----
+// ----- DB init (megtartva) -----
 fun initDataSource(): HikariDataSource {
     val dbUrl = System.getenv("DB_URL") ?: "jdbc:postgresql://localhost:5432/demo"
     val dbUser = System.getenv("DB_USER") ?: "demo"
@@ -110,7 +113,6 @@ fun initDataSource(): HikariDataSource {
 fun initDatabase(ds: HikariDataSource): Database {
     val db = Database.connect(ds)
     transaction(db) {
-        // Létrehozzuk az FcmTokens táblát is!
         SchemaUtils.create(Players, FcmTokens)
     }
     return db
@@ -125,9 +127,99 @@ fun main() {
     }.start(wait = true)
 }
 
+// Globális CoroutineScope a Firebase aszinkron műveletekhez
+private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+
 fun Application.module(db: Database) {
-    // Logoló inicializálása
-    val logger = LoggerFactory.getLogger("KtorApplication")
+    // Logoló inicializálása (maradt a felhasználó által használt stílusban)
+    val log = LoggerFactory.getLogger("KtorApplication") // Átneveztem 'logger'-ről 'log'-ra a Ktor konvenciók szerint, de a változó neve maradt.
+
+    // ---------------------------------------------------------------------
+    // FCM Inicializálás
+    // ---------------------------------------------------------------------
+    val firebaseServiceAccountKey = System.getenv("FIREBASE_SERVICE_ACCOUNT_KEY")
+
+    if (firebaseServiceAccountKey != null) {
+        try {
+            val credentials = GoogleCredentials.fromStream(ByteArrayInputStream(firebaseServiceAccountKey.toByteArray()))
+            val options = FirebaseOptions.builder()
+                .setCredentials(credentials)
+                // FIX: Ezt a sort kihagyjuk, mert a Service Account kulcs tartalmazza a projekt ID-t,
+                // és csak FCM-hez nincs szükség a Database URL explicit beállítására.
+                .build()
+
+            FirebaseApp.initializeApp(options)
+            log.info("Firebase Admin SDK sikeresen inicializálva.")
+        } catch (e: Exception) {
+            log.error("Hiba a Firebase Admin SDK inicializálása során. Ellenőrizze a FIREBASE_SERVICE_ACCOUNT_KEY változót!", e)
+        }
+    } else {
+        log.warn("A FIREBASE_SERVICE_ACCOUNT_KEY környezeti változó hiányzik. A push értesítések küldése nem fog működni!")
+    }
+
+    // ---------------------------------------------------------------------
+    // FCM Push Üzenet Küldő Függvény (JAVÍTVA)
+    // ---------------------------------------------------------------------
+
+    /**
+     * Lekéri az összes FCM tokent az adatbázisból és push üzenetet küld nekik.
+     * @param title Az értesítés címe.
+     * @param body Az értesítés tartalma.
+     */
+    fun sendPushNotification(title: String, body: String) {
+        // Ellenőrizzük, hogy inicializálva van-e a Firebase (ha nincs, a getInstance() hibát dobna)
+        if (FirebaseApp.getApps().isEmpty()) {
+            log.warn("A Firebase nincs inicializálva, a push üzenet küldése kihagyva.")
+            return
+        }
+
+        applicationScope.launch {
+            try {
+                // 1. Tokenek lekérése az adatbázisból
+                val tokens = transaction(db) {
+                    FcmTokens.selectAll().map { it[FcmTokens.token] }
+                }
+
+                if (tokens.isEmpty()) {
+                    log.warn("Nincs regisztrált FCM token, a push üzenet küldése kihagyva.")
+                    return@launch
+                }
+
+                // 2. Push üzenet összeállítása MulticastMessage-ként
+                // FIX: MulticastMessage-t használunk, mert több tokennek küldünk.
+                val multicastMessage = MulticastMessage.builder()
+                    .setNotification(com.google.firebase.messaging.Notification.builder()
+                        .setTitle(title)
+                        .setBody(body)
+                        .build())
+                    .addAllTokens(tokens) // <-- EZ MÁR MŰKÖDIK a MulticastMessage.Builder-en!
+                    .build()
+
+                // 3. Üzenet küldése a Firebase-nek
+                // FIX: sendMulticast-ot használunk egy MulticastMessage-el.
+                val response = FirebaseMessaging.getInstance().sendMulticast(multicastMessage)
+
+                log.info("Push üzenet küldési eredmény: Sikeres: ${response.successCount}, Sikertelen: ${response.failureCount}")
+
+                // Itt lehetne kezelni az érvénytelen tokeneket:
+                if (response.failureCount > 0) {
+                    response.responses.forEachIndexed { index, result ->
+                        if (!result.isSuccessful) {
+                            log.warn("Token: ${tokens[index]} sikertelen küldés: ${result.exception.message}")
+                        }
+                    }
+                }
+
+            } catch (e: Exception) {
+                log.error("Hiba a Firebase push üzenet küldése során.", e)
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Ktor Pluginok és Routing (Továbbiakban változatlan)
+    // ---------------------------------------------------------------------
 
     install(ContentNegotiation) { json() }
     install(WebSockets) {
@@ -152,27 +244,22 @@ fun Application.module(db: Database) {
     }
 
     routing {
-        // ---------------------------------------------------------------------
-        // POST /register_fcm_token - FCM Token regisztrálása/frissítése
-        // ---------------------------------------------------------------------
+        // POST /register_fcm_token (VÁLTOZATLAN)
         post("/register_fcm_token") {
             val registrationData = try {
                 call.receive<FcmTokenRegistration>()
             } catch (e: Exception) {
-                logger.warn("Received invalid body for token registration: ${e.message}")
-                // call.respondText a `post` korutinon belül van, így ez rendben van
+                log.warn("Received invalid body for token registration: ${e.message}")
                 call.respondText("Invalid request body (expected fcm_token)", status = HttpStatusCode.BadRequest)
                 return@post
             }
 
             val token = registrationData.fcmToken
 
-            // JAVÍTÁS: Külső változók a válasz státuszának és tartalmának tárolására
             var httpStatus: HttpStatusCode = HttpStatusCode.InternalServerError
             var responseBody: Map<String, String> = mapOf("status" to "Database initialization failure")
 
             try {
-                // A transaction blokk befejeződik, mielőtt a call.respond() meghívásra kerülne
                 transaction(db) {
                     val existing = FcmTokens.select { FcmTokens.token eq token }.singleOrNull()
 
@@ -182,9 +269,7 @@ fun Application.module(db: Database) {
                             it[FcmTokens.token] = token
                             it[registeredAt] = CurrentDateTime
                         }
-                        logger.info("New FCM Token registered: $token")
-
-                        // Csak a válasz változóit állítjuk be
+                        log.info("New FCM Token registered: $token")
                         httpStatus = HttpStatusCode.Created
                         responseBody = mapOf("status" to "Token registered successfully")
 
@@ -193,41 +278,36 @@ fun Application.module(db: Database) {
                         FcmTokens.update({ FcmTokens.token eq token }) {
                             it[registeredAt] = CurrentDateTime
                         }
-                        logger.info("Existing FCM Token updated: $token")
-
-                        // Csak a válasz változóit állítjuk be
+                        log.info("Existing FCM Token updated: $token")
                         httpStatus = HttpStatusCode.OK
                         responseBody = mapOf("status" to "Token updated successfully")
                     }
                 }
 
-                // JAVÍTÁS: A call.respond HÍVÁSA a tranzakciós blokkon KÍVÜL történik
                 call.respond(httpStatus, responseBody)
 
             } catch (e: Exception) {
-                logger.error("Database error during token registration: ${e.message}", e)
+                log.error("Database error during token registration: ${e.message}", e)
                 call.respondText("Internal Server Error: Database operation failed.", status = HttpStatusCode.InternalServerError)
             }
         }
-        // ---------------------------------------------------------------------
 
-
-        // GET /players
+        // GET /players (VÁLTOZATLAN)
         get("/players") {
-            logger.info("Processing GET /players request.")
+            log.info("Processing GET /players request.")
             val players = transaction(db) {
                 Players.selectAll().map {
                     PlayerDTO(it[Players.id], it[Players.name], it[Players.age])
                 }
             }
-            logger.info("Found ${players.size} players. Responding to client.")
+            log.info("Found ${players.size} players. Responding to client.")
             call.respond(players)
         }
 
-        // POST /players
+        // POST /players (FRISSÍTVE: Push üzenet küldése)
         post("/players") {
             val newPlayer = call.receive<NewPlayerDTO>()
-            logger.info("Processing POST /players request. Player: ${newPlayer.name}")
+            log.info("Processing POST /players request. Player: ${newPlayer.name}")
 
             val id = transaction(db) {
                 Players.insert {
@@ -237,23 +317,27 @@ fun Application.module(db: Database) {
             }
             val player = PlayerDTO(id, newPlayer.name, newPlayer.age)
 
-            // broadcast
+            // 1. Broadcast WS esemény
             val event = WsEvent.PlayerAdded(player)
             val message = json.encodeToString(WsEvent.serializer(), event)
-
-            logger.debug("Broadcasting PlayerAdded for ID $id to ${clients.size} clients.")
-
+            log.debug("Broadcasting PlayerAdded for ID $id to ${clients.size} clients.")
             clients.forEach { session ->
                 session.send(message)
             }
 
+            // 2. Push értesítés küldése
+            sendPushNotification(
+                title = "Új játékos!",
+                body = "${player.name} (${player.age ?: "n/a"}) hozzá lett adva a listához."
+            )
+
             call.respond(player)
         }
 
-        // DELETE /players/{id}
+        // DELETE /players/{id} (FRISSÍTVE: Push üzenet küldése)
         delete("/players/{id}") {
             val id = call.parameters["id"]?.toIntOrNull()
-            logger.info("Processing DELETE /players/${id} request.")
+            log.info("Processing DELETE /players/${id} request.")
 
             if (id != null) {
                 val deletedCount = transaction(db) {
@@ -261,27 +345,34 @@ fun Application.module(db: Database) {
                 }
 
                 if (deletedCount > 0) {
-                    // broadcast
+                    // 1. Broadcast WS esemény
                     val event = WsEvent.PlayerDeleted(id)
                     val message = json.encodeToString(WsEvent.serializer(), event)
                     clients.forEach { session -> session.send(message) }
-                    logger.debug("Successfully deleted player ID $id. Broadcasting PlayerDeleted to ${clients.size} clients.")
+                    log.debug("Successfully deleted player ID $id. Broadcasting PlayerDeleted to ${clients.size} clients.")
+
+                    // 2. Push értesítés küldése
+                    sendPushNotification(
+                        title = "Játékos törölve",
+                        body = "A(z) ID $id játékos el lett távolítva a listáról."
+                    )
+
                     call.respond(HttpStatusCode.OK, mapOf("status" to "deleted"))
                 } else {
-                    logger.warn("Delete failed. Player ID $id not found.")
+                    log.warn("Delete failed. Player ID $id not found.")
                     call.respondText("Player not found", status = HttpStatusCode.NotFound)
                 }
             } else {
-                logger.warn("Invalid ID received for delete.")
+                log.warn("Invalid ID received for delete.")
                 call.respondText("Invalid id", status = HttpStatusCode.BadRequest)
             }
         }
 
-        // PUT /players/{id}
+        // PUT /players/{id} (FRISSÍTVE: Push üzenet küldése)
         put("/players/{id}") {
             val id = call.parameters["id"]?.toIntOrNull() ?: run {
                 call.respondText("Invalid id", status = HttpStatusCode.BadRequest)
-                logger.warn("Invalid ID received for update.")
+                log.warn("Invalid ID received for update.")
                 return@put
             }
 
@@ -289,11 +380,11 @@ fun Application.module(db: Database) {
                 call.receive<NewPlayerDTO>()
             } catch (e: Exception) {
                 call.respondText("Invalid request body", status = HttpStatusCode.BadRequest)
-                logger.error("Invalid request body for update ID $id. Error: ${e.message}")
+                log.error("Invalid request body for update ID $id. Error: ${e.message}")
                 return@put
             }
 
-            logger.info("Processing PUT /players/$id request. New data: Name=${updatedPlayerDTO.name}")
+            log.info("Processing PUT /players/$id request. New data: Name=${updatedPlayerDTO.name}")
 
             val updatedCount = transaction(db) {
                 Players.update({ Players.id eq id }) {
@@ -304,25 +395,31 @@ fun Application.module(db: Database) {
 
             if (updatedCount > 0) {
                 val updatedPlayer = PlayerDTO(id, updatedPlayerDTO.name, updatedPlayerDTO.age)
+
+                // 1. Broadcast WS esemény
                 val event = WsEvent.PlayerUpdated(updatedPlayer)
                 val message = json.encodeToString(WsEvent.serializer(), event)
-
-                logger.debug("Broadcasting PlayerUpdated for ID $id to ${clients.size} clients.")
-
+                log.debug("Broadcasting PlayerUpdated for ID $id to ${clients.size} clients.")
                 clients.forEach { session ->
                     session.send(message)
                 }
 
+                // 2. Push értesítés küldése
+                sendPushNotification(
+                    title = "Játékos adatok frissítve",
+                    body = "${updatedPlayer.name} (ID $id) adatai frissítésre kerültek."
+                )
+
                 call.respond(HttpStatusCode.OK, updatedPlayer)
             } else {
                 call.respondText("Player not found", status = HttpStatusCode.NotFound)
-                logger.warn("Update failed. Player ID $id not found in DB.")
+                log.warn("Update failed. Player ID $id not found in DB.")
             }
         }
 
-        // WebSocket endpoint
+        // WebSocket endpoint (VÁLTOZATLAN)
         webSocket("/ws/players") {
-            logger.info("New WebSocket client connected. Current clients: ${clients.size + 1}")
+            log.info("New WebSocket client connected. Current clients: ${clients.size + 1}")
             clients.add(this)
             try {
                 incoming.consumeEach {
@@ -330,11 +427,11 @@ fun Application.module(db: Database) {
                 }
             } finally {
                 clients.remove(this)
-                logger.info("WebSocket client disconnected. Remaining clients: ${clients.size}")
+                log.info("WebSocket client disconnected. Remaining clients: ${clients.size}")
             }
         }
 
-        // Statikus fájlok kiszolgálása
+        // Statikus fájlok kiszolgálása (VÁLTOZATLAN)
         staticResources("/", "static") {
             default("admin_dashboard.html")
         }

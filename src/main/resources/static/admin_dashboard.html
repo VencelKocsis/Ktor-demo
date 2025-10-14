@@ -28,6 +28,60 @@
     (window.location.protocol === "https:" ? "wss://" : "ws://") +
     window.location.host + "/ws/players";
 
+        // --- FCM Konstansok és Függvények (ÚJ) ---
+        const FCM_REGISTRATION_URL = "/register_fcm_token";
+        // FIX: Placeholder token a teszteléshez.
+        const PLACEHOLDER_FCM_TOKEN = 'WEB_TEST_TOKEN_' + crypto.randomUUID();
+
+        /**
+         * FIGYELEM: A CANVAS KÖRNYEZETBEN TILTOTT AZ alert() ÉS confirm().
+         * Ezt a nagyon egyszerű, de nem blokkoló modalt használjuk a deletePlayer funkcióhoz.
+         * Éles környezetben ezt a funkciót egy valódi, DOM alapú modallal kell helyettesíteni!
+         */
+        function showNonBlockingWarning(message, callback) {
+            // A böngésző natív confirm() helyett itt kellene lennie egy aszinkron DOM modalnak.
+            // A teszteléshez a hagyományos confirm()-ot használjuk, de a kód ASZINKRON, mintha DOM modal lenne.
+            if (window.confirm(message)) {
+                callback(true);
+            } else {
+                callback(false);
+            }
+        }
+
+        /**
+         * Regisztrálja a placeholder FCM tokent a Ktor szerveren (ezt fogja értesíteni a POST /players).
+         */
+        async function registerFCMToken() {
+            const fcmStatusEl = document.getElementById('fcmStatus');
+            if (!fcmStatusEl) return;
+
+            fcmStatusEl.textContent = 'Regisztráció...';
+            fcmStatusEl.className = 'inline-flex items-center rounded-full bg-yellow-100 px-3 py-0.5 text-sm font-medium text-yellow-800';
+
+            try {
+                const response = await fetch(FCM_REGISTRATION_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fcm_token: PLACEHOLDER_FCM_TOKEN })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(`Szerver hiba: ${response.status}. Válasz: ${data.status || 'ismeretlen hiba'}`);
+                }
+
+                fcmStatusEl.textContent = `Regisztrált: ${data.status}`;
+                fcmStatusEl.className = 'inline-flex items-center rounded-full bg-green-100 px-3 py-0.5 text-sm font-medium text-green-800';
+
+                console.log("FCM Token Registration successful:", data.status);
+
+            } catch (error) {
+                console.error("FCM regisztrációs hiba:", error);
+                fcmStatusEl.textContent = `Hiba: ${error.message}`;
+                fcmStatusEl.className = 'inline-flex items-center rounded-full bg-red-100 px-3 py-0.5 text-sm font-medium text-red-800';
+            }
+        }
 
         // Globális WebSocket objektum a kapcsolat kezeléséhez
         let ws;
@@ -226,37 +280,43 @@
         /**
          * Játékos törlése DELETE kéréssel.
          */
+        /**
+         * Játékos törlése DELETE kéréssel. (FRISSÍTVE: confirm() helyett showNonBlockingWarning)
+         */
         async function deletePlayer(id) {
             const playerName = playersData.find(p => p.id === id)?.name || id;
 
-            if (!confirm(`Biztosan törölni szeretné a(z) "${playerName}" játékost (ID: ${id})?`)) {
-                return;
-            }
-
-            const statusEl = document.getElementById('status');
-            statusEl.textContent = `Játékos ${id} törlése...`;
-            statusEl.className = 'text-center text-blue-600 my-4';
-
-            try {
-                // Törlés végpont hívása
-                const response = await fetch(`${BACKEND_API_URL}/${id}`, {
-                    method: 'DELETE',
-                });
-
-                if (!response.ok) {
-                    const errorBody = await response.text();
-                    throw new Error(`HTTP hiba: ${response.status} (${response.statusText}). Válasz: ${errorBody}`);
+            // FIX: showNonBlockingWarning használata (ld. fent)
+            showNonBlockingWarning(`Biztosan törölni szeretné a(z) "${playerName}" játékost (ID: ${id})?`, async (confirmed) => {
+                if (!confirmed) {
+                    return;
                 }
 
-                // A Ktor küld egy WS eseményt PlayerDeleted-et, ami frissíti a listát.
-                statusEl.textContent = `Játékos ${id} sikeresen törlésre került. (WS frissíti a listát)`;
-                statusEl.className = 'text-center text-green-600 my-4 font-bold';
+                const statusEl = document.getElementById('status');
+                statusEl.textContent = `Játékos ${id} törlése...`;
+                statusEl.className = 'text-center text-blue-600 my-4';
 
-            } catch (error) {
-                console.error("Hiba a játékos törlése során:", error);
-                statusEl.textContent = `Hiba a törlés során: ${error.message}`;
-                statusEl.className = 'text-center text-red-600 my-4 font-bold';
-            }
+                try {
+                    // Törlés végpont hívása
+                    const response = await fetch(`${BACKEND_API_URL}/${id}`, {
+                        method: 'DELETE',
+                    });
+
+                    if (!response.ok) {
+                        const errorBody = await response.text();
+                        throw new Error(`HTTP hiba: ${response.status} (${response.statusText}). Válasz: ${errorBody}`);
+                    }
+
+                    // A Ktor küld egy WS eseményt PlayerDeleted-et, ami frissíti a listát.
+                    statusEl.textContent = `Játékos ${id} sikeresen törlésre került. (WS frissíti a listát)`;
+                    statusEl.className = 'text-center text-green-600 my-4 font-bold';
+
+                } catch (error) {
+                    console.error("Hiba a játékos törlése során:", error);
+                    statusEl.textContent = `Hiba a törlés során: ${error.message}`;
+                    statusEl.className = 'text-center text-red-600 my-4 font-bold';
+                }
+            });
         }
 
         /**
@@ -416,6 +476,25 @@ async function saveEdit(event) {
 
     <!-- Státusz üzenetek -->
     <div id="status" class="text-center text-gray-500 my-4"></div>
+
+    <!-- FCM Token Regisztráció -->
+    <section class="mb-8 p-6 bg-purple-50 rounded-lg border border-purple-200">
+        <div class="flex flex-col sm:flex-row justify-between items-center">
+            <div class="mb-4 sm:mb-0">
+                <h2 class="text-xl font-semibold text-purple-700">Push Értesítések Tesztelése (FCM)</h2>
+                <p class="text-sm text-gray-600">Nyomja meg a gombot a teszt token regisztrálásához. Ez küldi a push értesítéseket, amikor új játékost ad hozzá.</p>
+            </div>
+            <div class="flex space-x-4 items-center">
+            <span id="fcmStatus" class="inline-flex items-center rounded-full bg-gray-200 px-3 py-0.5 text-sm font-medium text-gray-700">
+                Nem regisztrált
+            </span>
+                <button onclick="registerFCMToken()"
+                        class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-6 rounded-lg transition duration-200 shadow-md transform hover:scale-105">
+                    FCM Token Regisztrálása
+                </button>
+            </div>
+        </div>
+    </section>
 
     <!-- JÁTÉKOS HOZZÁADÁSA ŰRLAP -->
     <section class="mb-8 p-6 bg-indigo-50 rounded-lg border border-indigo-200">

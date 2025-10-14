@@ -31,11 +31,15 @@ dependencies {
     // WebSocket támogatás
     implementation(libs.ktor.server.websockets)
 
+    // Firebase Admin SDK a Push értesítésekhez
+    implementation(libs.firebase.admin)
+
     // Adatbázis (HikariCP + Exposed + PostgreSQL)
     implementation(libs.exposed.core)
     implementation(libs.exposed.dao)
     implementation(libs.exposed.jdbc)
-    // ÚJ: Dátum/Idő típusok támogatása az Exposed-ban
+
+    // Dátum/Idő típusok támogatása az Exposed-ban
     implementation(libs.exposed.java.time)
     implementation(libs.hikaricp)
     implementation(libs.postgresql)
