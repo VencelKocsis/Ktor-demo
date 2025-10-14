@@ -35,6 +35,8 @@ dependencies {
     implementation(libs.exposed.core)
     implementation(libs.exposed.dao)
     implementation(libs.exposed.jdbc)
+    // ÚJ: Dátum/Idő típusok támogatása az Exposed-ban
+    implementation(libs.exposed.java.time)
     implementation(libs.hikaricp)
     implementation(libs.postgresql)
 
