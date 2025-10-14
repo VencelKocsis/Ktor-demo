@@ -4,7 +4,7 @@ import com.google.auth.oauth2.GoogleCredentials
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.messaging.FirebaseMessaging
-import com.google.firebase.messaging.MulticastMessage // <-- ÚJ IMPORT
+import com.google.firebase.messaging.MulticastMessage
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.ktor.http.HttpStatusCode
@@ -47,7 +47,7 @@ import org.slf4j.LoggerFactory
 import java.io.ByteArrayInputStream
 import java.time.Duration
 
-// ----- DTO-k (megtartva) -----
+// ----- DTO-k -----
 @Serializable
 data class FcmTokenRegistration(
     @SerialName("fcm_token") val fcmToken: String
@@ -59,7 +59,7 @@ data class PlayerDTO(val id: Int, val name: String, val age: Int?)
 @Serializable
 data class NewPlayerDTO(val name: String, val age: Int?)
 
-// ----- WebSocket események (megtartva) -----
+// ----- WebSocket események -----
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
 @JsonClassDiscriminator("type")
@@ -77,7 +77,7 @@ sealed class WsEvent {
     data class PlayerUpdated(val player: PlayerDTO) : WsEvent()
 }
 
-// ----- Exposed táblák (Players és FcmTokens megtartva) -----
+// ----- Exposed táblák -----
 object Players : Table("players") {
     val id = integer("id").autoIncrement()
     val name = varchar("name", length = 100)
@@ -91,7 +91,7 @@ object FcmTokens : Table("fcm_tokens") {
     override val primaryKey = PrimaryKey(token)
 }
 
-// ----- DB init (megtartva) -----
+// ----- DB init -----
 fun initDataSource(): HikariDataSource {
     val dbUrl = System.getenv("DB_URL") ?: "jdbc:postgresql://localhost:5432/demo"
     val dbUser = System.getenv("DB_USER") ?: "demo"
@@ -118,7 +118,7 @@ fun initDatabase(ds: HikariDataSource): Database {
     return db
 }
 
-// ----- Main (megtartva) -----
+// ----- Main -----
 fun main() {
     val ds = initDataSource()
     val db = initDatabase(ds)
@@ -132,34 +132,36 @@ private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 
 fun Application.module(db: Database) {
-    // Logoló inicializálása (maradt a felhasználó által használt stílusban)
-    val log = LoggerFactory.getLogger("KtorApplication") // Átneveztem 'logger'-ről 'log'-ra a Ktor konvenciók szerint, de a változó neve maradt.
+    // Logoló inicializálása (az első sorba helyezve)
+    val log = LoggerFactory.getLogger("KtorApplication")
 
     // ---------------------------------------------------------------------
     // FCM Inicializálás
+    // Cél: Beolvassa a privát kulcsot egyetlen hosszú környezeti változóból (Render)
     // ---------------------------------------------------------------------
     val firebaseServiceAccountKey = System.getenv("FIREBASE_SERVICE_ACCOUNT_KEY")
 
-    if (firebaseServiceAccountKey != null) {
+    if (firebaseServiceAccountKey != null && firebaseServiceAccountKey.isNotBlank()) {
         try {
+            // A JSON string beolvasása bájtfolyamba
             val credentials = GoogleCredentials.fromStream(ByteArrayInputStream(firebaseServiceAccountKey.toByteArray()))
+
             val options = FirebaseOptions.builder()
                 .setCredentials(credentials)
-                // FIX: Ezt a sort kihagyjuk, mert a Service Account kulcs tartalmazza a projekt ID-t,
-                // és csak FCM-hez nincs szükség a Database URL explicit beállítására.
+                // A Database URL-t kihagyhatjuk, ha csak FCM-et használunk, ahogy helyesen tette.
                 .build()
 
             FirebaseApp.initializeApp(options)
-            log.info("Firebase Admin SDK sikeresen inicializálva.")
+            log.info("Firebase Admin SDK sikeresen inicializálva a környezeti változóból (FIREBASE_SERVICE_ACCOUNT_KEY).")
         } catch (e: Exception) {
-            log.error("Hiba a Firebase Admin SDK inicializálása során. Ellenőrizze a FIREBASE_SERVICE_ACCOUNT_KEY változót!", e)
+            log.error("Hiba a Firebase Admin SDK inicializálása során. Ellenőrizze, hogy a kulcs JSON formátumú és EGY SORBAN van-e!", e)
         }
     } else {
-        log.warn("A FIREBASE_SERVICE_ACCOUNT_KEY környezeti változó hiányzik. A push értesítések küldése nem fog működni!")
+        log.warn("A FIREBASE_SERVICE_ACCOUNT_KEY környezeti változó hiányzik vagy üres. A push értesítések küldése nem fog működni!")
     }
 
     // ---------------------------------------------------------------------
-    // FCM Push Üzenet Küldő Függvény (JAVÍTVA)
+    // FCM Push Üzenet Küldő Függvény (VÁLTOZATLAN)
     // ---------------------------------------------------------------------
 
     /**
@@ -168,7 +170,7 @@ fun Application.module(db: Database) {
      * @param body Az értesítés tartalma.
      */
     fun sendPushNotification(title: String, body: String) {
-        // Ellenőrizzük, hogy inicializálva van-e a Firebase (ha nincs, a getInstance() hibát dobna)
+        // Ellenőrizzük, hogy inicializálva van-e a Firebase
         if (FirebaseApp.getApps().isEmpty()) {
             log.warn("A Firebase nincs inicializálva, a push üzenet küldése kihagyva.")
             return
@@ -178,6 +180,7 @@ fun Application.module(db: Database) {
             try {
                 // 1. Tokenek lekérése az adatbázisból
                 val tokens = transaction(db) {
+                    // Megszabadulhatunk a nagyon régi vagy érvénytelen tokenektől is itt, de a selectAll() most jó.
                     FcmTokens.selectAll().map { it[FcmTokens.token] }
                 }
 
@@ -187,25 +190,23 @@ fun Application.module(db: Database) {
                 }
 
                 // 2. Push üzenet összeállítása MulticastMessage-ként
-                // FIX: MulticastMessage-t használunk, mert több tokennek küldünk.
                 val multicastMessage = MulticastMessage.builder()
                     .setNotification(com.google.firebase.messaging.Notification.builder()
                         .setTitle(title)
                         .setBody(body)
                         .build())
-                    .addAllTokens(tokens) // <-- EZ MÁR MŰKÖDIK a MulticastMessage.Builder-en!
+                    .addAllTokens(tokens)
                     .build()
 
                 // 3. Üzenet küldése a Firebase-nek
-                // FIX: sendMulticast-ot használunk egy MulticastMessage-el.
                 val response = FirebaseMessaging.getInstance().sendMulticast(multicastMessage)
 
                 log.info("Push üzenet küldési eredmény: Sikeres: ${response.successCount}, Sikertelen: ${response.failureCount}")
 
-                // Itt lehetne kezelni az érvénytelen tokeneket:
                 if (response.failureCount > 0) {
                     response.responses.forEachIndexed { index, result ->
                         if (!result.isSuccessful) {
+                            // FIGYELEM: Itt a result.exception.errorCode használható a token érvénytelenítésére is, ha szükséges.
                             log.warn("Token: ${tokens[index]} sikertelen küldés: ${result.exception.message}")
                         }
                     }
@@ -218,7 +219,7 @@ fun Application.module(db: Database) {
     }
 
     // ---------------------------------------------------------------------
-    // Ktor Pluginok és Routing (Továbbiakban változatlan)
+    // Ktor Pluginok és Routing (VÁLTOZATLAN)
     // ---------------------------------------------------------------------
 
     install(ContentNegotiation) { json() }
@@ -244,7 +245,7 @@ fun Application.module(db: Database) {
     }
 
     routing {
-        // POST /register_fcm_token (VÁLTOZATLAN)
+        // POST /register_fcm_token
         post("/register_fcm_token") {
             val registrationData = try {
                 call.receive<FcmTokenRegistration>()
@@ -292,7 +293,7 @@ fun Application.module(db: Database) {
             }
         }
 
-        // GET /players (VÁLTOZATLAN)
+        // GET /players
         get("/players") {
             log.info("Processing GET /players request.")
             val players = transaction(db) {
@@ -304,7 +305,7 @@ fun Application.module(db: Database) {
             call.respond(players)
         }
 
-        // POST /players (FRISSÍTVE: Push üzenet küldése)
+        // POST /players
         post("/players") {
             val newPlayer = call.receive<NewPlayerDTO>()
             log.info("Processing POST /players request. Player: ${newPlayer.name}")
@@ -334,13 +335,15 @@ fun Application.module(db: Database) {
             call.respond(player)
         }
 
-        // DELETE /players/{id} (FRISSÍTVE: Push üzenet küldése)
+        // DELETE /players/{id}
         delete("/players/{id}") {
             val id = call.parameters["id"]?.toIntOrNull()
             log.info("Processing DELETE /players/${id} request.")
 
             if (id != null) {
+                var playerName: String? = null
                 val deletedCount = transaction(db) {
+                    playerName = Players.select(Players.id eq id).singleOrNull()?.get(Players.name)
                     Players.deleteWhere { Players.id eq id }
                 }
 
@@ -354,7 +357,7 @@ fun Application.module(db: Database) {
                     // 2. Push értesítés küldése
                     sendPushNotification(
                         title = "Játékos törölve",
-                        body = "A(z) ID $id játékos el lett távolítva a listáról."
+                        body = "${playerName ?: "Játékos ID $id"} el lett távolítva a listáról."
                     )
 
                     call.respond(HttpStatusCode.OK, mapOf("status" to "deleted"))
@@ -368,7 +371,7 @@ fun Application.module(db: Database) {
             }
         }
 
-        // PUT /players/{id} (FRISSÍTVE: Push üzenet küldése)
+        // PUT /players/{id}
         put("/players/{id}") {
             val id = call.parameters["id"]?.toIntOrNull() ?: run {
                 call.respondText("Invalid id", status = HttpStatusCode.BadRequest)
@@ -417,13 +420,13 @@ fun Application.module(db: Database) {
             }
         }
 
-        // WebSocket endpoint (VÁLTOZATLAN)
+        // WebSocket endpoint
         webSocket("/ws/players") {
             log.info("New WebSocket client connected. Current clients: ${clients.size + 1}")
             clients.add(this)
             try {
                 incoming.consumeEach {
-                    // Itt lehetne kezelni a bejövő üzeneteket, pl. a keep-alive pingeket
+                    // A bejövő üzenetek kezelése itt történne
                 }
             } finally {
                 clients.remove(this)
@@ -431,7 +434,7 @@ fun Application.module(db: Database) {
             }
         }
 
-        // Statikus fájlok kiszolgálása (VÁLTOZATLAN)
+        // Statikus fájlok kiszolgálása
         staticResources("/", "static") {
             default("admin_dashboard.html")
         }
