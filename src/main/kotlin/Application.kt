@@ -55,7 +55,6 @@ object Players : IntIdTable("players") {
 }
 
 object FcmTokens : Table("fcm_tokens") {
-    // JAVÍTVA: CurrentDateTime() helyett CurrentDateTime
     val userId = varchar("user_id", length = 100).uniqueIndex()
     val token = varchar("token", length = 255)
     val registeredAt = datetime("registered_at").defaultExpression(CurrentDateTime)
@@ -105,6 +104,9 @@ fun initDataSource(): HikariDataSource {
 fun initDatabase(ds: HikariDataSource): Database {
     val db = Database.connect(ds)
     transaction(db) {
+        // !!! IDEIGLENES JAVÍTÁS A SÉMA HIBA ELKERÜLÉSÉRE !!!
+        // Eldobjuk a régi (esetleg hibás) táblákat, hogy az új séma garantáltan létrejöjjön.
+        SchemaUtils.drop(Players, FcmTokens)
         SchemaUtils.create(Players, FcmTokens)
     }
     return db
@@ -201,7 +203,6 @@ fun Application.module(db: Database) {
             val userId = registration.userId
 
             transaction(db) {
-                // JAVÍTVA: CurrentDateTime() helyett CurrentDateTime
                 FcmTokens.replace {
                     it[FcmTokens.userId] = userId
                     it[FcmTokens.token] = token
@@ -228,8 +229,7 @@ fun Application.module(db: Database) {
             val player = call.receive<NewPlayerDTO>()
             val saved = savePlayer(db, player)
 
-            // JAVÍTVA: Nem email alapú teszt ID.
-            // DEMÓ CÉL: Push értesítés küldése annak a felhasználónak, akinek a tokent regisztráljuk.
+            // A cél User ID, aminek a tokent regisztrálni kell.
             val targetUserId = "test-user-fcm-target"
 
             val targetToken = transaction(db) {
