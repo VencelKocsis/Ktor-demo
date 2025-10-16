@@ -196,6 +196,36 @@ fun Application.module(db: Database) {
     val json = Json { classDiscriminator = "type"; encodeDefaults = true }
 
     routing {
+        // Játékos frissítése (PUT)
+        put("/players/{id}") {
+            val id = call.parameters["id"]?.toIntOrNull()
+                ?: return@put call.respond(HttpStatusCode.BadRequest, "Invalid ID")
+
+            val updatedPlayer = call.receive<NewPlayerDTO>()
+
+            val rowAffected = transaction(db) {
+                Players.update({ Players.id eq id }) {
+                    it[name] = updatedPlayer.name
+                    it[age] = updatedPlayer.age
+                    // A userId-t itt nem frissítjük, az a token regisztrációhoz kell
+                }
+            }
+
+            if (rowAffected == 0) {
+                call.respond(HttpStatusCode.NotFound, "Player not found")
+                return@put
+            }
+
+            val saved = PlayerDTO(id, updatedPlayer.name, updatedPlayer.age)
+
+            // WebSocket Broadcast
+            val event = WsEvent.PlayerUpdated(saved)
+            val message = json.encodeToString(WsEvent.serializer(), event)
+            clients.forEach { session -> session.send(message) }
+
+            call.respond(HttpStatusCode.OK, saved)
+        }
+
         // FCM token regisztrálás
         post("/register_fcm_token") {
             val registration = call.receive<FcmTokenRegistration>()
