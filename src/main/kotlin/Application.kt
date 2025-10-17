@@ -37,7 +37,7 @@ import java.time.Duration
 // ---------------- DTO-k ----------------
 
 @Serializable
-data class FcmTokenRegistration(val userId: String, val token: String)
+data class FcmTokenRegistration(val email: String, val token: String)
 
 @Serializable
 data class PlayerDTO(val id: Int, val name: String, val age: Int?)
@@ -50,16 +50,22 @@ data class NewPlayerDTO(val name: String, val age: Int?)
 object Players : IntIdTable("players") {
     val name = varchar("name", length = 100)
     val age = integer("age").nullable()
-    // ÚJ: A játékosnak van egy Firebase (vagy bármilyen) User ID-ja
     val userId = varchar("user_id", length = 100).uniqueIndex().nullable()
 }
 
 object FcmTokens : Table("fcm_tokens") {
-    val userId = varchar("user_id", length = 100).uniqueIndex()
+    val email = varchar("email", length = 150).uniqueIndex()
     val token = varchar("token", length = 255)
     val registeredAt = datetime("registered_at").defaultExpression(CurrentDateTime)
-    override val primaryKey = PrimaryKey(userId)
+    override val primaryKey = PrimaryKey(email)
 }
+
+@Serializable
+data class SendNotificationRequest(
+    val targetEmail: String,
+    val title: String,
+    val body: String
+)
 
 // ---------------- WebSocket események ----------------
 @OptIn(ExperimentalSerializationApi::class)
@@ -196,6 +202,30 @@ fun Application.module(db: Database) {
     val json = Json { classDiscriminator = "type"; encodeDefaults = true }
 
     routing {
+        post("/send_fcm_notification") {
+            val request = call.receive<SendNotificationRequest>()
+            val targetEmail = request.targetEmail
+
+            val targetToken = transaction(db) {
+                FcmTokens.select { FcmTokens.email eq targetEmail }
+                    .singleOrNull()?.get(FcmTokens.token)
+            }
+
+            if (targetToken == null) {
+                call.respond(HttpStatusCode.NotFound, "Nincs FCM token ehhez az e-mailhez: $targetEmail")
+                return@post
+            }
+
+            // 📞 A közös segédfüggvény meghívása
+            sendFcmNotification(
+                token = targetToken,
+                title = request.title,
+                body = request.body
+            )
+
+            call.respond(HttpStatusCode.OK, mapOf("status" to "sent_via_admin_sdk"))
+        }
+
         // Játékos frissítése (PUT)
         put("/players/{id}") {
             val id = call.parameters["id"]?.toIntOrNull()
@@ -230,16 +260,16 @@ fun Application.module(db: Database) {
         post("/register_fcm_token") {
             val registration = call.receive<FcmTokenRegistration>()
             val token = registration.token
-            val userId = registration.userId
+            val email = registration.email
 
             transaction(db) {
                 FcmTokens.replace {
-                    it[FcmTokens.userId] = userId
+                    it[FcmTokens.email] = email
                     it[FcmTokens.token] = token
                     it[registeredAt] = CurrentDateTime
                 }
             }
-            appLog.info("✅ FCM token regisztrálva/frissítve: User=$userId, Token=$token")
+            appLog.info("✅ FCM token regisztrálva/frissítve: Email=$email, Token=$token")
 
             call.respond(HttpStatusCode.OK, mapOf("status" to "ok"))
         }
@@ -263,7 +293,7 @@ fun Application.module(db: Database) {
             val targetUserId = "test-user-fcm-target"
 
             val targetToken = transaction(db) {
-                FcmTokens.select { FcmTokens.userId eq targetUserId }.singleOrNull()?.get(FcmTokens.token)
+                FcmTokens.select { FcmTokens.email eq targetUserId }.singleOrNull()?.get(FcmTokens.token)
             }
 
             if (targetToken != null) {
@@ -275,7 +305,6 @@ fun Application.module(db: Database) {
             } else {
                 appLog.warn("⚠️ Nincs FCM token a(z) $targetUserId felhasználóhoz. Kérjük, győződjön meg róla, hogy az Android app elküldte a tokent erre a User ID-ra.")
             }
-
 
             // WebSocket Broadcast
             val event = WsEvent.PlayerAdded(saved)
