@@ -113,6 +113,7 @@ fun initDataSource(): HikariDataSource {
         isAutoCommit = false
         transactionIsolation = "TRANSACTION_REPEATABLE_READ"
     }
+    appLog.info("🌐 Adatbázis inicializálás elindult.")
 
     return HikariDataSource(cfg)
 }
@@ -123,6 +124,8 @@ fun initDatabase(ds: HikariDataSource): Database {
         // Csak akkor hozzuk létre, ha hiányzik
         SchemaUtils.createMissingTablesAndColumns(Players, FcmTokens)
     }
+    appLog.info("✅ Adatbázis sikeresen inicializálva és táblák ellenőrizve.")
+
     return db
 }
 
@@ -151,6 +154,8 @@ fun sendFcmNotification(token: String, title: String, body: String) {
                 )
                 .build()
 
+            appLog.info("🚀 FCM üzenet küldése indult. Cím: '$title'")
+
             val response = FirebaseMessaging.getInstance().send(message)
             appLog.info("✅ FCM üzenet elküldve: $response")
         } catch (e: Exception) {
@@ -160,6 +165,8 @@ fun sendFcmNotification(token: String, title: String, body: String) {
 }
 
 fun savePlayer(db: Database, player: NewPlayerDTO): PlayerDTO {
+    appLog.info("💾 Játékos mentése adatbázisba: ${player.name}")
+
     val id = transaction(db) {
         Players.insertAndGetId {
             it[name] = player.name
@@ -167,7 +174,9 @@ fun savePlayer(db: Database, player: NewPlayerDTO): PlayerDTO {
             it[email] = player.email
         }.value
     }
-    return PlayerDTO(id, player.name, player.age, player.email)
+    val savedPlayer = PlayerDTO(id, player.name, player.age, player.email)
+    appLog.info("✅ Játékos sikeresen mentve. ID: $id, Email: ${player.email}")
+    return savedPlayer
 }
 
 // ---------------- Main ----------------
@@ -178,6 +187,7 @@ fun main() {
     embeddedServer(Netty, port = 8080, host = "0.0.0.0") {
         module(db)
     }.start(wait = true)
+    appLog.info("🚀 Ktor szerver elindult a 8080-as porton.") // Log szerver induláskor
 }
 
 // ---------------- Application modul ----------------
@@ -211,12 +221,16 @@ fun Application.module(db: Database) {
         // ---------------- FCM üzenet küldés ----------------
         post("/send_fcm_notification") {
             val request = call.receive<SendNotificationRequest>()
+
+            appLog.info("📩 FCM küldési kérés érkezett. Cél: ${request.targetEmail}")
+
             val targetToken = transaction(db) {
                 FcmTokens.select { FcmTokens.email eq request.targetEmail }
                     .singleOrNull()?.get(FcmTokens.token)
             }
 
             if (targetToken == null) {
+                appLog.warn("🛑 Hiba: FCM token nem található ehhez az e-mailhez: ${request.targetEmail}")
                 call.respond(HttpStatusCode.NotFound, "Nincs token ehhez az e-mailhez: ${request.targetEmail}")
                 return@post
             }
@@ -250,6 +264,7 @@ fun Application.module(db: Database) {
                     )
                 }
             }
+            appLog.info("📥 GET /players lekérdezés: ${players.size} játékos visszaadva.")
             call.respond(players)
         }
 
@@ -261,12 +276,19 @@ fun Application.module(db: Database) {
             val message = json.encodeToString(WsEvent.serializer(), event)
             clients.forEach { it.send(message) }
 
+            appLog.info("📣 WS: PlayerAdded broadcastolva ${clients.size} kliensnek. Player ID: ${saved.id}")
+            clients.forEach {
+                it.send(message)
+            }
+
             call.respond(HttpStatusCode.Created, saved)
         }
 
         put("/players/{id}") {
             val id = call.parameters["id"]?.toIntOrNull()
                 ?: return@put call.respond(HttpStatusCode.BadRequest, "Invalid ID")
+
+            appLog.info("📝 PUT /players/$id szerkesztési kérés.")
 
             val updated = call.receive<NewPlayerDTO>()
             val rowAffected = transaction(db) {
@@ -278,6 +300,7 @@ fun Application.module(db: Database) {
             }
 
             if (rowAffected == 0) {
+                appLog.warn("🛑 Hiba: Játékos nem található az ID: $id alatt.")
                 call.respond(HttpStatusCode.NotFound, "Player not found")
                 return@put
             }
@@ -285,6 +308,8 @@ fun Application.module(db: Database) {
             val saved = PlayerDTO(id, updated.name, updated.age, updated.email)
             val event = WsEvent.PlayerUpdated(saved)
             val message = json.encodeToString(WsEvent.serializer(), event)
+
+            appLog.info("📣 WS: PlayerUpdated broadcastolva ${clients.size} kliensnek. Player ID: $id")
             clients.forEach { it.send(message) }
 
             call.respond(saved)
@@ -294,10 +319,14 @@ fun Application.module(db: Database) {
             val id = call.parameters["id"]?.toIntOrNull()
                 ?: return@delete call.respond(HttpStatusCode.BadRequest, "Invalid ID")
 
+            appLog.info("🗑️ DELETE /players/$id törlési kérés.")
+
             transaction(db) { Players.deleteWhere { Players.id eq id } }
 
             val event = WsEvent.PlayerDeleted(id)
             val message = json.encodeToString(WsEvent.serializer(), event)
+
+            appLog.info("📣 WS: PlayerDeleted broadcastolva ${clients.size} kliensnek. Player ID: $id")
             clients.forEach { it.send(message) }
 
             call.respond(HttpStatusCode.OK)
@@ -305,11 +334,13 @@ fun Application.module(db: Database) {
 
         // ---------------- WebSocket ----------------
         webSocket("/ws/players") {
+            appLog.info("🔗 Új WebSocket kliens csatlakozott. Jelenlegi kliensek száma: ${clients.size + 1}")
             clients.add(this)
             try {
                 incoming.consumeEach { }
             } finally {
                 clients.remove(this)
+                appLog.info("💔 WebSocket kliens lekapcsolódott. Jelenlegi kliensek száma: ${clients.size}")
             }
         }
 
