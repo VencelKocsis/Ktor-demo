@@ -206,6 +206,7 @@ async function addPlayer(event) {
 
     const nameInput = document.getElementById('playerName').value.trim();
     const ageInput = document.getElementById('playerAge').value.trim();
+    const emailInput = document.getElementById('playerEmail').value.trim();
 
     if (nameInput === "") {
         statusEl.textContent = "Kérem adja meg a játékos nevét!";
@@ -217,7 +218,8 @@ async function addPlayer(event) {
 
     const newPlayerDTO = {
         name: nameInput,
-        age: age
+        age: age,
+        email: emailInput
     };
 
     statusEl.textContent = 'Játékos hozzáadása...';
@@ -300,6 +302,7 @@ function handleEdit(player) {
     document.getElementById('editPlayerId').value = player.id;
     document.getElementById('editPlayerName').value = player.name;
     document.getElementById('editPlayerAge').value = player.age != null ? player.age : '';
+    document.getElementById('editPlayerEmail').value = player.email;
 
     // Megjelenítjük a modalt
     const modal = document.getElementById('editModal');
@@ -329,10 +332,11 @@ async function saveEdit(event) {
     const statusEl = document.getElementById('status');
     const nameInput = document.getElementById('editPlayerName').value.trim();
     const ageInput = document.getElementById('editPlayerAge').value.trim();
+    const emailInput = document.getElementById('editPlayerEmail').value.trim();
     const playerId = editingPlayer.id; // ID kinyerése a tárolt objektumból
 
-    if (nameInput === "") {
-        statusEl.textContent = "A név nem lehet üres a szerkesztés során!";
+    if (nameInput === "" || emailInput === "") {
+        statusEl.textContent = "A név és az E-mail nem lehet üres a szerkesztés során!";
         statusEl.className = 'text-center text-red-500 my-4';
         return;
     }
@@ -341,7 +345,8 @@ async function saveEdit(event) {
 
     const updatedPlayerDTO = {
         name: nameInput,
-        age: age
+        age: age,
+        email: emailInput
     };
 
     const putUrl = `${BACKEND_API_URL}/${playerId}`;

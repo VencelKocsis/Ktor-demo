@@ -27,8 +27,6 @@ import kotlinx.serialization.json.*
 import org.jetbrains.exposed.dao.id.IntIdTable
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.javatime.CurrentDateTime
-import org.jetbrains.exposed.sql.javatime.datetime
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.slf4j.LoggerFactory
 import java.io.ByteArrayInputStream
@@ -37,28 +35,25 @@ import java.time.Duration
 // ---------------- DTO-k ----------------
 
 @Serializable
-data class FcmTokenRegistration(val email: String, val token: String)
+data class FcmTokenRegistration(
+    val email: String,
+    val token: String
+)
 
 @Serializable
-data class PlayerDTO(val id: Int, val name: String, val age: Int?)
+data class PlayerDTO(
+    val id: Int,
+    val name: String,
+    val age: Int?,
+    val email: String
+)
 
 @Serializable
-data class NewPlayerDTO(val name: String, val age: Int?)
-
-// ---------------- Exposed táblák ----------------
-
-object Players : IntIdTable("players") {
-    val name = varchar("name", length = 100)
-    val age = integer("age").nullable()
-    val userId = varchar("user_id", length = 100).uniqueIndex().nullable()
-}
-
-object FcmTokens : Table("fcm_tokens") {
-    val email = varchar("email", length = 150).uniqueIndex()
-    val token = varchar("token", length = 255)
-    val registeredAt = datetime("registered_at").defaultExpression(CurrentDateTime)
-    override val primaryKey = PrimaryKey(email)
-}
+data class NewPlayerDTO(
+    val name: String,
+    val age: Int?,
+    val email: String
+)
 
 @Serializable
 data class SendNotificationRequest(
@@ -67,7 +62,22 @@ data class SendNotificationRequest(
     val body: String
 )
 
+// ---------------- Exposed táblák ----------------
+
+object Players : IntIdTable("players") {
+    val name = varchar("name", 100)
+    val age = integer("age").nullable()
+    val email = varchar("email", 150)
+}
+
+object FcmTokens : Table("fcm_tokens") {
+    val email = varchar("email", 150).uniqueIndex()
+    val token = text("token")
+    override val primaryKey = PrimaryKey(email)
+}
+
 // ---------------- WebSocket események ----------------
+
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
 @JsonClassDiscriminator("type")
@@ -110,10 +120,8 @@ fun initDataSource(): HikariDataSource {
 fun initDatabase(ds: HikariDataSource): Database {
     val db = Database.connect(ds)
     transaction(db) {
-        // !!! IDEIGLENES JAVÍTÁS A SÉMA HIBA ELKERÜLÉSÉRE !!!
-        // Eldobjuk a régi (esetleg hibás) táblákat, hogy az új séma garantáltan létrejöjjön.
-        SchemaUtils.drop(Players, FcmTokens)
-        SchemaUtils.create(Players, FcmTokens)
+        // Csak akkor hozzuk létre, ha hiányzik
+        SchemaUtils.createMissingTablesAndColumns(Players, FcmTokens)
     }
     return db
 }
@@ -144,7 +152,7 @@ fun sendFcmNotification(token: String, title: String, body: String) {
                 .build()
 
             val response = FirebaseMessaging.getInstance().send(message)
-            appLog.info("✅ FCM üzenet sikeresen elküldve. Token: $token, Válasz ID: $response")
+            appLog.info("✅ FCM üzenet elküldve: $response")
         } catch (e: Exception) {
             appLog.error("❌ FCM küldési hiba: ${e.message}")
         }
@@ -156,9 +164,10 @@ fun savePlayer(db: Database, player: NewPlayerDTO): PlayerDTO {
         Players.insertAndGetId {
             it[name] = player.name
             it[age] = player.age
+            it[email] = player.email
         }.value
     }
-    return PlayerDTO(id, player.name, player.age)
+    return PlayerDTO(id, player.name, player.age, player.email)
 }
 
 // ---------------- Main ----------------
@@ -176,10 +185,9 @@ fun main() {
 fun Application.module(db: Database) {
     // Firebase init
     val firebaseServiceAccountKey = System.getenv("FIREBASE_SERVICE_ACCOUNT_KEY")
-    if (firebaseServiceAccountKey != null && firebaseServiceAccountKey.isNotBlank()) {
+    if (!firebaseServiceAccountKey.isNullOrBlank()) {
         try {
-            val credentials =
-                GoogleCredentials.fromStream(ByteArrayInputStream(firebaseServiceAccountKey.toByteArray()))
+            val credentials = GoogleCredentials.fromStream(ByteArrayInputStream(firebaseServiceAccountKey.toByteArray()))
             val options = FirebaseOptions.builder().setCredentials(credentials).build()
             FirebaseApp.initializeApp(options)
             appLog.info("✅ Firebase inicializálva.")
@@ -187,57 +195,85 @@ fun Application.module(db: Database) {
             appLog.error("❌ Firebase inicializálás sikertelen: ${e.message}")
         }
     } else {
-        appLog.warn("⚠️ Nincs FIREBASE_SERVICE_ACCOUNT_KEY beállítva.")
+        appLog.warn("⚠️ FIREBASE_SERVICE_ACCOUNT_KEY nincs beállítva.")
     }
 
     install(ContentNegotiation) { json() }
     install(WebSockets) {
         pingPeriod = Duration.ofSeconds(10)
         timeout = Duration.ofSeconds(60)
-        maxFrameSize = Long.MAX_VALUE
-        masking = false
     }
 
     val clients = mutableListOf<DefaultWebSocketServerSession>()
     val json = Json { classDiscriminator = "type"; encodeDefaults = true }
 
     routing {
+        // ---------------- FCM üzenet küldés ----------------
         post("/send_fcm_notification") {
             val request = call.receive<SendNotificationRequest>()
-            val targetEmail = request.targetEmail
-
             val targetToken = transaction(db) {
-                FcmTokens.select { FcmTokens.email eq targetEmail }
+                FcmTokens.select { FcmTokens.email eq request.targetEmail }
                     .singleOrNull()?.get(FcmTokens.token)
             }
 
             if (targetToken == null) {
-                call.respond(HttpStatusCode.NotFound, "Nincs FCM token ehhez az e-mailhez: $targetEmail")
+                call.respond(HttpStatusCode.NotFound, "Nincs token ehhez az e-mailhez: ${request.targetEmail}")
                 return@post
             }
 
-            // 📞 A közös segédfüggvény meghívása
-            sendFcmNotification(
-                token = targetToken,
-                title = request.title,
-                body = request.body
-            )
-
-            call.respond(HttpStatusCode.OK, mapOf("status" to "sent_via_admin_sdk"))
+            sendFcmNotification(targetToken, request.title, request.body)
+            call.respond(HttpStatusCode.OK, mapOf("status" to "sent"))
         }
 
-        // Játékos frissítése (PUT)
+        // ---------------- FCM token regisztrálás ----------------
+        post("/register_fcm_token") {
+            val registration = call.receive<FcmTokenRegistration>()
+            transaction(db) {
+                FcmTokens.replace {
+                    it[email] = registration.email
+                    it[token] = registration.token
+                }
+            }
+            appLog.info("✅ FCM token regisztrálva/frissítve: Email=${registration.email}") // Logolás hozzáadva
+            call.respond(HttpStatusCode.OK, mapOf("status" to "ok"))
+        }
+
+        // ---------------- Játékos CRUD ----------------
+        get("/players") {
+            val players = transaction(db) {
+                Players.selectAll().map {
+                    PlayerDTO(
+                        it[Players.id].value,
+                        it[Players.name],
+                        it[Players.age],
+                        it[Players.email]
+                    )
+                }
+            }
+            call.respond(players)
+        }
+
+        post("/players") {
+            val player = call.receive<NewPlayerDTO>()
+            val saved = savePlayer(db, player)
+
+            val event = WsEvent.PlayerAdded(saved)
+            val message = json.encodeToString(WsEvent.serializer(), event)
+            clients.forEach { it.send(message) }
+
+            call.respond(HttpStatusCode.Created, saved)
+        }
+
         put("/players/{id}") {
             val id = call.parameters["id"]?.toIntOrNull()
                 ?: return@put call.respond(HttpStatusCode.BadRequest, "Invalid ID")
 
-            val updatedPlayer = call.receive<NewPlayerDTO>()
-
+            val updated = call.receive<NewPlayerDTO>()
             val rowAffected = transaction(db) {
                 Players.update({ Players.id eq id }) {
-                    it[name] = updatedPlayer.name
-                    it[age] = updatedPlayer.age
-                    // A userId-t itt nem frissítjük, az a token regisztrációhoz kell
+                    it[name] = updated.name
+                    it[age] = updated.age
+                    it[email] = updated.email
                 }
             }
 
@@ -246,99 +282,28 @@ fun Application.module(db: Database) {
                 return@put
             }
 
-            val saved = PlayerDTO(id, updatedPlayer.name, updatedPlayer.age)
-
-            // WebSocket Broadcast
+            val saved = PlayerDTO(id, updated.name, updated.age, updated.email)
             val event = WsEvent.PlayerUpdated(saved)
             val message = json.encodeToString(WsEvent.serializer(), event)
-            clients.forEach { session -> session.send(message) }
+            clients.forEach { it.send(message) }
 
-            call.respond(HttpStatusCode.OK, saved)
+            call.respond(saved)
         }
 
-        // FCM token regisztrálás
-        post("/register_fcm_token") {
-            val registration = call.receive<FcmTokenRegistration>()
-            val token = registration.token
-            val email = registration.email
-
-            transaction(db) {
-                FcmTokens.replace {
-                    it[FcmTokens.email] = email
-                    it[FcmTokens.token] = token
-                    it[registeredAt] = CurrentDateTime
-                }
-            }
-            appLog.info("✅ FCM token regisztrálva/frissítve: Email=$email, Token=$token")
-
-            call.respond(HttpStatusCode.OK, mapOf("status" to "ok"))
-        }
-
-        // Játékos lekérés
-        get("/players") {
-            val players = transaction(db) {
-                Players.selectAll().map {
-                    PlayerDTO(it[Players.id].value, it[Players.name], it[Players.age])
-                }
-            }
-            call.respond(players)
-        }
-
-        // Új játékos mentése (ezt használjuk a meghívás szimulálására)
-        post("/players") {
-            val player = call.receive<NewPlayerDTO>()
-            val saved = savePlayer(db, player)
-
-            // A cél User ID, aminek a tokent regisztrálni kell.
-            val targetUserId = "test-user-fcm-target"
-
-            val targetToken = transaction(db) {
-                FcmTokens.select { FcmTokens.email eq targetUserId }.singleOrNull()?.get(FcmTokens.token)
-            }
-
-            if (targetToken != null) {
-                sendFcmNotification(
-                    token = targetToken,
-                    title = "Nevezés a versenyre!",
-                    body = "${player.name} nevezett téged a 'Példa Kupa' versenyre."
-                )
-            } else {
-                appLog.warn("⚠️ Nincs FCM token a(z) $targetUserId felhasználóhoz. Kérjük, győződjön meg róla, hogy az Android app elküldte a tokent erre a User ID-ra.")
-            }
-
-            // WebSocket Broadcast
-            val event = WsEvent.PlayerAdded(saved)
-            val message = json.encodeToString(WsEvent.serializer(), event)
-            clients.forEach { session -> session.send(message) }
-
-            call.respond(HttpStatusCode.Created, saved)
-        }
-
-        // Törlés
         delete("/players/{id}") {
             val id = call.parameters["id"]?.toIntOrNull()
                 ?: return@delete call.respond(HttpStatusCode.BadRequest, "Invalid ID")
-
-            val name = transaction(db) {
-                val row = Players.select { Players.id eq id }.singleOrNull()
-                row?.get(Players.name)
-            }
-
-            if (name == null) {
-                call.respond(HttpStatusCode.NotFound, "Player not found")
-                return@delete
-            }
 
             transaction(db) { Players.deleteWhere { Players.id eq id } }
 
             val event = WsEvent.PlayerDeleted(id)
             val message = json.encodeToString(WsEvent.serializer(), event)
-            clients.forEach { session -> session.send(message) }
+            clients.forEach { it.send(message) }
 
             call.respond(HttpStatusCode.OK)
         }
 
-        // WebSocket
+        // ---------------- WebSocket ----------------
         webSocket("/ws/players") {
             clients.add(this)
             try {
@@ -348,8 +313,6 @@ fun Application.module(db: Database) {
             }
         }
 
-        staticResources("/", "static") {
-            default("admin_dashboard.html")
-        }
+        staticResources("/", "static") { default("admin_dashboard.html") }
     }
 }
