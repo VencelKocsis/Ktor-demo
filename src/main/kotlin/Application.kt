@@ -112,7 +112,7 @@ fun initDatabase(ds: HikariDataSource): Database {
     transaction(db) {
         // !!! IDEIGLENES JAVÍTÁS A SÉMA HIBA ELKERÜLÉSÉRE !!!
         // Eldobjuk a régi (esetleg hibás) táblákat, hogy az új séma garantáltan létrejöjjön.
-        //SchemaUtils.drop(Players, FcmTokens)
+        SchemaUtils.drop(Players, FcmTokens)
         SchemaUtils.create(Players, FcmTokens)
     }
     return db
