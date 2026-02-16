@@ -9,33 +9,33 @@
     <link rel="stylesheet" href="css/styles.css">
 
     <script src="js/admin.js"></script>
-
 </head>
-<body class="p-4 md:p-8">
+<body class="p-4 md:p-8 bg-gray-100 min-h-screen">
 
-<div class="container-box mx-auto bg-white p-6 md:p-10 rounded-xl">
-    <header class="mb-8 border-b pb-4 flex justify-between items-center">
+<div class="container mx-auto bg-white p-6 md:p-10 rounded-xl shadow-lg max-w-5xl">
+
+    <header class="mb-8 border-b pb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
             <h1 class="text-3xl font-extrabold text-indigo-700">Rendszer Adminisztrációs Felület</h1>
             <p class="text-gray-500 mt-1">Játékos adatok kezelése a Docker konténerben futó backend segítségével.</p>
         </div>
-        <div id="wsStatus" class="inline-flex items-center rounded-full bg-gray-200 px-3 py-0.5 text-sm font-medium text-gray-700">
+        <div id="wsStatus" class="inline-flex items-center rounded-full bg-gray-200 px-3 py-1 text-sm font-medium text-gray-700 whitespace-nowrap">
             WS Kapcsolat
         </div>
     </header>
 
-    <div id="status" class="text-center text-gray-500 my-4"></div>
+    <div id="status" class="text-center min-h-[1.5rem] my-4 transition-all duration-300"></div>
 
-    <section class="mb-8 p-6 bg-purple-50 rounded-lg border border-purple-200">
-        <div class="flex flex-col sm:flex-row justify-between items-center">
-            <div class="mb-4 sm:mb-0">
+    <section class="mb-8 p-6 bg-purple-50 rounded-lg border border-purple-200 shadow-sm">
+        <div class="flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div>
                 <h2 class="text-xl font-semibold text-purple-700">Push Értesítések Tesztelése (FCM)</h2>
-                <p class="text-sm text-gray-600">Nyomja meg a gombot a teszt token regisztrálásához. Ez küldi a push értesítéseket, amikor új játékost ad hozzá.</p>
+                <p class="text-sm text-gray-600 mt-1">Nyomja meg a gombot a teszt token regisztrálásához. Ez küldi a push értesítéseket, amikor új játékost ad hozzá.</p>
             </div>
-            <div class="flex space-x-4 items-center">
-            <span id="fcmStatus" class="inline-flex items-center rounded-full bg-gray-200 px-3 py-0.5 text-sm font-medium text-gray-700">
-                Nem regisztrált
-            </span>
+            <div class="flex flex-col sm:flex-row items-center gap-3">
+                <span id="fcmStatus" class="inline-flex items-center rounded-full bg-gray-200 px-3 py-1 text-sm font-medium text-gray-700">
+                    Nem regisztrált
+                </span>
                 <button onclick="registerFCMToken()"
                         class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-6 rounded-lg transition duration-200 shadow-md transform hover:scale-105">
                     FCM Token Regisztrálása
@@ -44,79 +44,92 @@
         </div>
     </section>
 
-    <section class="mb-8 p-6 bg-indigo-50 rounded-lg border border-indigo-200">
+    <section class="mb-8 p-6 bg-indigo-50 rounded-lg border border-indigo-200 shadow-sm">
         <h2 class="text-xl font-semibold mb-4 text-indigo-700">Új Játékos Felvétele</h2>
         <form id="addPlayerForm" onsubmit="addPlayer(event)" class="space-y-4">
-            <div class="flex flex-col sm:flex-row sm:space-x-4 space-y-4 sm:space-y-0">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
-                    <label for="playerEmail" class="block text-sm font-medium text-gray-700">E-mail*</label>
-                    <input type="email" id="playerEmail" name="playerEmail" required
-                           class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-                </div>
-                <div class="flex-1">
-                    <label for="playerAge" class="block text-sm font-medium text-gray-700">Életkor (Opcionális)</label>
-                    <input type="number" id="playerAge" name="playerAge" min="1" max="150"
-                           class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    <label for="playerName" class="block text-sm font-medium text-gray-700 mb-1">Név*</label>
+                    <input type="text" id="playerName" name="playerName" required placeholder="pl. Kiss János"
+                           class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors">
                 </div>
                 <div>
-                    <label for="editPlayerEmail" class="block text-sm font-medium text-gray-700">E-mail*</label>
-                    <input type="email" id="editPlayerEmail" name="playerEmail" required
-                           class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    <label for="playerAge" class="block text-sm font-medium text-gray-700 mb-1">Életkor (Opcionális)</label>
+                    <input type="number" id="playerAge" name="playerAge" min="1" max="150" placeholder="pl. 25"
+                           class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors">
+                </div>
+                <div>
+                    <label for="playerEmail" class="block text-sm font-medium text-gray-700 mb-1">E-mail*</label>
+                    <input type="email" id="playerEmail" name="playerEmail" required placeholder="pl. janos@example.com"
+                           class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors">
                 </div>
             </div>
 
-            <button type="submit"
-                    class="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg transition duration-200 shadow-md transform hover:scale-105">
-                Játékos Hozzáadása
-            </button>
+            <div class="flex justify-end mt-4">
+                <button type="submit"
+                        class="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg transition duration-200 shadow-md transform hover:scale-105 flex items-center justify-center gap-2">
+                    <span>+</span> Játékos Hozzáadása
+                </button>
+            </div>
         </form>
     </section>
 
-    <section id="playerList" class="overflow-x-auto rounded-lg border border-gray-200 mt-8">
-        <h2 class="text-xl font-semibold p-4 bg-gray-50 text-gray-700 border-b">Játékosok listája</h2>
-        <div class="flex justify-end p-4 bg-gray-50">
+    <section id="playerList" class="rounded-lg border border-gray-200 overflow-hidden shadow-sm">
+        <div class="flex flex-col sm:flex-row justify-between items-center p-4 bg-gray-50 border-b gap-4">
+            <h2 class="text-xl font-semibold text-gray-700">Játékosok listája</h2>
             <button onclick="fetchPlayers()"
-                    class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-md">
-                Adatok Frissítése (HTTP)
+                    class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-sm text-sm">
+                ↻ Adatok Frissítése (HTTP)
             </button>
         </div>
-        <table class="min-w-full divide-y divide-gray-200">
-            <thead class="table-header">
-            <tr>
-                <th class="py-3 px-6 text-left text-sm font-semibold uppercase tracking-wider">ID</th>
-                <th class="py-3 px-6 text-left text-sm font-semibold uppercase tracking-wider">Név</th>
-                <th class="py-3 px-6 text-left text-sm font-semibold uppercase tracking-wider">Életkor</th>
-                <th class="py-3 px-6 text-center text-sm font-semibold uppercase tracking-wider">Műveletek</th>
-            </tr>
-            </thead>
-            <tbody id="playerTableBody" class="bg-white divide-y divide-gray-200">
-            </tbody>
-        </table>
+
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-100">
+                <tr>
+                    <th class="py-3 px-6 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">ID</th>
+                    <th class="py-3 px-6 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Név</th>
+                    <th class="py-3 px-6 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">E-mail</th>
+                    <th class="py-3 px-6 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Életkor</th>
+                    <th class="py-3 px-6 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Műveletek</th>
+                </tr>
+                </thead>
+                <tbody id="playerTableBody" class="bg-white divide-y divide-gray-200">
+                </tbody>
+            </table>
+        </div>
     </section>
 
 </div>
 
-<div id="editModal" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden items-center justify-center p-4 transition-opacity duration-300">
-    <div class="bg-white rounded-lg shadow-2xl w-full max-w-md p-6 transform scale-100 transition-transform duration-300">
-        <h3 class="text-2xl font-bold mb-4 text-indigo-700">Játékos szerkesztése</h3>
+<div id="editModal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden items-center justify-center p-4 z-50 backdrop-blur-sm transition-opacity duration-300">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 transform scale-100 transition-transform duration-300">
+        <h3 class="text-2xl font-bold mb-6 text-indigo-700 border-b pb-2">Játékos szerkesztése</h3>
+
         <form id="editPlayerForm" onsubmit="saveEdit(event)" class="space-y-4">
             <input type="hidden" id="editPlayerId" name="id">
 
             <div>
-                <label for="editPlayerName" class="block text-sm font-medium text-gray-700">Név*</label>
+                <label for="editPlayerName" class="block text-sm font-medium text-gray-700 mb-1">Név*</label>
                 <input type="text" id="editPlayerName" name="playerName" required
-                       class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                       class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
             </div>
 
             <div>
-                <label for="editPlayerAge" class="block text-sm font-medium text-gray-700">Életkor (Opcionális)</label>
+                <label for="editPlayerAge" class="block text-sm font-medium text-gray-700 mb-1">Életkor (Opcionális)</label>
                 <input type="number" id="editPlayerAge" name="playerAge" min="1" max="150"
-                       class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                       class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
             </div>
 
-            <div class="flex justify-end space-x-3 pt-2">
+            <div>
+                <label for="editPlayerEmail" class="block text-sm font-medium text-gray-700 mb-1">E-mail*</label>
+                <input type="email" id="editPlayerEmail" name="playerEmail" required
+                       class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+            </div>
+
+            <div class="flex justify-end space-x-3 pt-4 border-t mt-4">
                 <button type="button" onclick="closeEditModal()"
-                        class="bg-gray-400 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                        class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-lg transition duration-200">
                     Mégse
                 </button>
                 <button type="submit"
