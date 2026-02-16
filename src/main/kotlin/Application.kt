@@ -107,6 +107,8 @@ fun initDataSource(): HikariDataSource {
     val dbPassword = System.getenv("DB_PASSWORD")
         ?: "demo"
 
+    appLog.info("DB_URL: $dbUrl")
+
     val cfg = HikariConfig().apply {
         jdbcUrl = dbUrl
         username = dbUser
@@ -116,14 +118,13 @@ fun initDataSource(): HikariDataSource {
         isAutoCommit = false
         transactionIsolation = "TRANSACTION_REPEATABLE_READ"
 
-        // 🔥 Render miatt fontos
+        // Render SSL
         addDataSourceProperty("sslmode", "require")
     }
 
     appLog.info("🌐 Adatbázis inicializálás elindult.")
     return HikariDataSource(cfg)
 }
-
 
 fun initDatabase(ds: HikariDataSource): Database {
     val db = Database.connect(ds)
