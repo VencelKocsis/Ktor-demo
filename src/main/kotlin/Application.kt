@@ -98,25 +98,32 @@ sealed class WsEvent {
 // ---------------- Adatbázis init ----------------
 
 fun initDataSource(): HikariDataSource {
-    val dbUrl = System.getenv("DB_URL") ?: "jdbc:postgresql://localhost:5432/demo"
-    val dbUser = System.getenv("DB_USER") ?: "demo"
-    val dbPassword = System.getenv("DB_PASSWORD") ?: "demo"
+    val dbUrl = System.getenv("DB_URL")
+        ?: "jdbc:postgresql://localhost:5432/demo"
 
-    val jdbcUrlWithSsl = "$dbUrl?sslmode=require"
+    val dbUser = System.getenv("DB_USER")
+        ?: "demo"
+
+    val dbPassword = System.getenv("DB_PASSWORD")
+        ?: "demo"
 
     val cfg = HikariConfig().apply {
-        jdbcUrl = jdbcUrlWithSsl
+        jdbcUrl = dbUrl
         username = dbUser
         password = dbPassword
         driverClassName = "org.postgresql.Driver"
         maximumPoolSize = 3
         isAutoCommit = false
         transactionIsolation = "TRANSACTION_REPEATABLE_READ"
-    }
-    appLog.info("🌐 Adatbázis inicializálás elindult.")
 
+        // 🔥 Render miatt fontos
+        addDataSourceProperty("sslmode", "require")
+    }
+
+    appLog.info("🌐 Adatbázis inicializálás elindult.")
     return HikariDataSource(cfg)
 }
+
 
 fun initDatabase(ds: HikariDataSource): Database {
     val db = Database.connect(ds)
