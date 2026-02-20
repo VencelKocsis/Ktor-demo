@@ -8,6 +8,7 @@ import com.google.firebase.messaging.Message
 import com.google.firebase.messaging.Notification
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import hu.bme.aut.android.demo.model.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.*
@@ -34,34 +35,6 @@ import java.time.Duration
 import java.time.LocalDate
 
 // ---------------- DTO-k ----------------
-
-@Serializable
-data class FcmTokenRegistration(
-    val email: String,
-    val token: String
-)
-
-@Serializable
-data class PlayerDTO(
-    val id: Int,
-    val name: String,
-    val age: Int?,
-    val email: String
-)
-
-@Serializable
-data class NewPlayerDTO(
-    val name: String,
-    val age: Int?,
-    val email: String
-)
-
-@Serializable
-data class SendNotificationRequest(
-    val targetEmail: String,
-    val title: String,
-    val body: String
-)
 
 // ---------------- Exposed táblák ----------------
 
@@ -416,6 +389,47 @@ fun Application.module(db: Database) {
             clients.forEach { it.send(message) }
 
             call.respond(HttpStatusCode.OK)
+        }
+
+        get("/teams") {
+            appLog.info("📥 GET /teams lekérdezés...")
+
+            try {
+                val teamsResponse = transaction(db) {
+                    // Végigmegyünk a csapatokon
+                    Teams.selectAll().map { teamRow ->
+                        val tId = teamRow[Teams.id].value
+
+                        // Megkeressük a csapat klubját
+                        val clubRow = Clubs.select { Clubs.id eq teamRow[Teams.clubId] }.single()
+
+                        // Megkeressük a csapat tagjait (INNER JOIN)
+                        val membersList = (TeamMembers innerJoin Users)
+                            .select { TeamMembers.teamId eq tId }
+                            .map { memberRow ->
+                                MemberDTO(
+                                    userId = memberRow[Users.id].value,
+                                    name = "${memberRow[Users.lastName]} ${memberRow[Users.firstName]}",
+                                    isCaptain = memberRow[TeamMembers.isCaptain]
+                                )
+                            }
+
+                        TeamWithMembersDTO(
+                            teamId = tId,
+                            teamName = teamRow[Teams.name],
+                            clubName = clubRow[Clubs.name],
+                            division = teamRow[Teams.division],
+                            members = membersList
+                        )
+                    }
+                }
+
+                call.respond(teamsResponse)
+
+            } catch (e: Exception) {
+                appLog.error("Hiba a /teams lekérdezésekor: ${e.message}", e)
+                call.respond(HttpStatusCode.InternalServerError, "Adatbázis hiba történt")
+            }
         }
 
         // ---------------- WebSocket ----------------
