@@ -265,10 +265,15 @@ fun savePlayer(db: Database, player: NewPlayerDTO): PlayerDTO {
 fun main() {
     val ds = initDataSource()
     val db = initDatabase(ds)
-    embeddedServer(Netty, port = 8080, host = "0.0.0.0") {
+
+    // --- Port dinamikus beolvasása ---
+    // A Render.com a "PORT" környezeti változóban mondja meg, hol kell futnia az appnak.
+    val port = System.getenv("PORT")?.toIntOrNull() ?: 8080
+
+    embeddedServer(Netty, port = port, host = "0.0.0.0") {
         module(db)
     }.start(wait = true)
-    appLog.info("🚀 Ktor szerver elindult a 8080-as porton.") // Log szerver induláskor
+    appLog.info("🚀 Ktor szerver elindult a $port-as porton.") // Log szerver induláskor
 }
 
 // ---------------- Application modul ----------------
