@@ -8,7 +8,12 @@ data class TeamWithMembersDTO(
     val teamName: String,
     val clubName: String,
     val division: String?,
-    val members: List<MemberDTO>
+    val members: List<MemberDTO>,
+    val matchesPlayed: Int,
+    val wins: Int,
+    val losses: Int,
+    val draws: Int,
+    val points: Int
 )
 
 @Serializable
@@ -16,6 +21,18 @@ data class MemberDTO(
     val userId: Int,
     val name: String,
     val isCaptain: Boolean
+)
+
+@Serializable
+data class MatchDTO(
+    val id: Int,
+    val roundNumber: Int,
+    val homeTeamName: String,
+    val guestTeamName: String,
+    val homeScore: Int,
+    val guestScore: Int,
+    val date: String,
+    val status: String
 )
 
 @Serializable

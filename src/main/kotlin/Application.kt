@@ -180,6 +180,36 @@ fun seedDatabaseIfNeeded() {
             userCounter++
         }
     }
+
+    // 5. Fordulók és Meccsek létrehozása
+    val activeSeasonId = Seasons.select { Seasons.isActive eq true }.first()[Seasons.id]
+
+    val match1 = Matches.insertAndGetId {
+        it[seasonId] = activeSeasonId
+        it[roundNumber] = 1
+        it[homeTeamId] = mafc1
+        it[guestTeamId] = beac1
+        it[homeTeamScore] = 10
+        it[guestTeamScore] = 8
+        it[status] = "finished"
+        it[matchDate] = LocalDate.of(2026, 2, 15).atTime(18, 0)
+    }
+
+    // Egyéni meccsek a fenti rangadóhoz
+    val mafcPlayerId = (TeamMembers innerJoin Users).select { TeamMembers.teamId eq mafc1 }.first()[Users.id]
+    val beacPlayerId = (TeamMembers innerJoin Users).select { TeamMembers.teamId eq beac1 }.first()[Users.id]
+
+    IndividualGames.insert {
+        it[matchId] = match1
+        it[homePlayerId] = mafcPlayerId
+        it[guestPlayerId] = beacPlayerId
+        it[homeSetsWon] = 3
+        it[guestSetsWon] = 1
+        it[setScores] = "11-9, 11-7, 8-11, 11-5"
+    }
+
+    appLog.info("✅ Fordulók és egyéni meccsek betöltve!")
+
     appLog.info("✅ Tesztadatok (Klubok, Csapatok, Játékosok) sikeresen betöltve!")
 }
 
@@ -392,18 +422,38 @@ fun Application.module(db: Database) {
         }
 
         get("/teams") {
-            appLog.info("📥 GET /teams lekérdezés...")
-
             try {
                 val teamsResponse = transaction(db) {
-                    // Végigmegyünk a csapatokon
                     Teams.selectAll().map { teamRow ->
                         val tId = teamRow[Teams.id].value
 
-                        // Megkeressük a csapat klubját
-                        val clubRow = Clubs.select { Clubs.id eq teamRow[Teams.clubId] }.single()
+                        // 1. Meccsek lekérése (ahol a csapat hazai VAGY vendég volt)
+                        val teamMatches = Matches.select {
+                            (Matches.homeTeamId eq tId) or (Matches.guestTeamId eq tId)
+                        }.filter { it[Matches.status] == "finished" }
 
-                        // Megkeressük a csapat tagjait (INNER JOIN)
+                        // 2. Statisztikák kiszámítása
+                        var wins = 0
+                        var losses = 0
+                        var draws = 0
+
+                        teamMatches.forEach { row ->
+                            val isHome = row[Matches.homeTeamId].value == tId
+                            val homeScore = row[Matches.homeTeamScore]
+                            val guestScore = row[Matches.guestTeamScore]
+
+                            when {
+                                homeScore == guestScore -> draws++
+                                isHome && homeScore > guestScore -> wins++
+                                !isHome && guestScore > homeScore -> wins++
+                                else -> losses++
+                            }
+                        }
+
+                        val points = (wins * 3) + (draws * 1) // Standard pontszámítás
+
+                        // 3. Klub és tagok (marad a régi kódodból)
+                        val clubRow = Clubs.select { Clubs.id eq teamRow[Teams.clubId] }.single()
                         val membersList = (TeamMembers innerJoin Users)
                             .select { TeamMembers.teamId eq tId }
                             .map { memberRow ->
@@ -419,17 +469,50 @@ fun Application.module(db: Database) {
                             teamName = teamRow[Teams.name],
                             clubName = clubRow[Clubs.name],
                             division = teamRow[Teams.division],
-                            members = membersList
+                            members = membersList,
+                            matchesPlayed = teamMatches.size,
+                            wins = wins,
+                            losses = losses,
+                            draws = draws,
+                            points = points
                         )
                     }
                 }
-
                 call.respond(teamsResponse)
-
             } catch (e: Exception) {
-                appLog.error("Hiba a /teams lekérdezésekor: ${e.message}", e)
-                call.respond(HttpStatusCode.InternalServerError, "Adatbázis hiba történt")
+                appLog.error("Hiba: ${e.message}")
+                call.respond(HttpStatusCode.InternalServerError)
             }
+        }
+
+        get("/matches") {
+            val round = call.request.queryParameters["round"]?.toIntOrNull()
+
+            val matches = transaction(db) {
+                val query = if (round != null) {
+                    Matches.select { Matches.roundNumber eq round }
+                } else {
+                    Matches.selectAll()
+                }
+
+                query.map { row ->
+                    // Csapatnevek lekérése az ID-k alapján
+                    val homeName = Teams.select { Teams.id eq row[Matches.homeTeamId] }.single()[Teams.name]
+                    val guestName = Teams.select { Teams.id eq row[Matches.guestTeamId] }.single()[Teams.name]
+
+                    MatchDTO(
+                        id = row[Matches.id].value,
+                        roundNumber = row[Matches.roundNumber] ?: 0,
+                        homeTeamName = homeName,
+                        guestTeamName = guestName,
+                        homeScore = row[Matches.homeTeamScore],
+                        guestScore = row[Matches.guestTeamScore],
+                        date = row[Matches.matchDate]?.toString() ?: "",
+                        status = row[Matches.status]
+                    )
+                }
+            }
+            call.respond(matches)
         }
 
         // ---------------- WebSocket ----------------
