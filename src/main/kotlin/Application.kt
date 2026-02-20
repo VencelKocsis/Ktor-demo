@@ -31,6 +31,7 @@ import org.jetbrains.exposed.sql.transactions.transaction
 import org.slf4j.LoggerFactory
 import java.io.ByteArrayInputStream
 import java.time.Duration
+import java.time.LocalDate
 
 // ---------------- DTO-k ----------------
 
@@ -129,12 +130,84 @@ fun initDataSource(): HikariDataSource {
 fun initDatabase(ds: HikariDataSource): Database {
     val db = Database.connect(ds)
     transaction(db) {
-        // Csak akkor hozzuk létre, ha hiányzik
-        SchemaUtils.createMissingTablesAndColumns(Players, FcmTokens)
+        // LÉTREHOZZUK AZ ÖSSZES TÁBLÁT
+        SchemaUtils.createMissingTablesAndColumns(Players, FcmTokens, // régiek
+            Users, Clubs, Teams, TeamMembers, Seasons, Matches, IndividualGames // Az újak
+        )
+
+        // 2. BETÖLTJÜK A TESZTADATOKAT (Ha a tábla még üres)
+        seedDatabaseIfNeeded()
     }
     appLog.info("✅ Adatbázis sikeresen inicializálva és táblák ellenőrizve.")
 
     return db
+}
+
+// TESZTADATOK BETÖLTÉSE
+fun seedDatabaseIfNeeded() {
+    // Csak akkor töltjük fel, ha még nincsenek klubok
+    if (Clubs.selectAll().count() > 0) {
+        return // Már fel van töltve
+    }
+
+    appLog.info("🌱 Tesztadatok betöltése folyamatban...")
+
+    // 1. Szezonok
+    Seasons.insert {
+        it[name] = "2025 Ősz"
+        it[startDate] = LocalDate.of(2025, 9, 1)
+        it[endDate] = LocalDate.of(2025, 12, 15)
+        it[isActive] = false
+    }
+    Seasons.insert {
+        it[name] = "2026 Tavasz"
+        it[startDate] = LocalDate.of(2026, 2, 1)
+        it[endDate] = LocalDate.of(2026, 5, 31)
+        it[isActive] = true
+    }
+
+    // 2. Klubok
+    val beacId = Clubs.insertAndGetId {
+        it[name] = "BEAC"
+        it[address] = "1117 Budapest, Bogdánfy u. 10."
+    }
+    val mafcId = Clubs.insertAndGetId {
+        it[name] = "MAFC"
+        it[address] = "1111 Budapest, Műegyetem rkp. 3."
+    }
+
+    // 3. Csapatok
+    val beac1 = Teams.insertAndGetId { it[clubId] = beacId; it[name] = "BEAC I."; it[division] = "NB I." }
+    val beac2 = Teams.insertAndGetId { it[clubId] = beacId; it[name] = "BEAC II."; it[division] = "Budapest I." }
+    val mafc1 = Teams.insertAndGetId { it[clubId] = mafcId; it[name] = "MAFC I."; it[division] = "NB I." }
+    val mafc2 = Teams.insertAndGetId { it[clubId] = mafcId; it[name] = "MAFC II."; it[division] = "Budapest I." }
+
+    // 4. Játékosok és Csapattagok generálása
+    val teams = listOf(beac1, beac2, mafc1, mafc2)
+    var userCounter = 1
+
+    for (team in teams) {
+        for (i in 1..4) {
+            val isCap = (i == 1) // Az első ember a csapatkapitány
+
+            val userId = Users.insertAndGetId {
+                it[email] = "player${userCounter}@test.com"
+                it[passwordHash] = "hashed_pw" // Később ezt igazira kell cserélni
+                it[firstName] = "Player"
+                it[lastName] = userCounter.toString()
+                it[role] = "user"
+            }
+
+            TeamMembers.insert {
+                it[teamId] = team
+                it[this.userId] = userId
+                it[isCaptain] = isCap
+                it[joinedAt] = LocalDate.now()
+            }
+            userCounter++
+        }
+    }
+    appLog.info("✅ Tesztadatok (Klubok, Csapatok, Játékosok) sikeresen betöltve!")
 }
 
 // ---------------- Globális változók ----------------
