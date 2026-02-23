@@ -477,18 +477,21 @@ fun Application.module(db: Database) {
             call.respond(HttpStatusCode.OK)
         }
 
+        // Ktor Backend - Application.kt vagy Routing.kt
         get("/teams") {
+            appLog.info("📥 GET /teams lekérdezés...")
+
             try {
                 val teamsResponse = transaction(db) {
                     Teams.selectAll().map { teamRow ->
                         val tId = teamRow[Teams.id].value
+                        val clubRow = Clubs.select { Clubs.id eq teamRow[Teams.clubId] }.single()
 
-                        // 1. Meccsek lekérése (ahol a csapat hazai VAGY vendég volt)
+                        // --- ÚJ RÉSZ: Statisztikák lekérése a Matches táblából ---
                         val teamMatches = Matches.select {
                             (Matches.homeTeamId eq tId) or (Matches.guestTeamId eq tId)
                         }.filter { it[Matches.status] == "finished" }
 
-                        // 2. Statisztikák kiszámítása
                         var wins = 0
                         var losses = 0
                         var draws = 0
@@ -506,10 +509,9 @@ fun Application.module(db: Database) {
                             }
                         }
 
-                        val points = (wins * 3) + (draws * 1) // Standard pontszámítás
+                        val points = (wins * 3) + (draws * 1) // 3 pont a győzelemért, 1 a döntetlenért
+                        // -----------------------------------------------------------
 
-                        // 3. Klub és tagok (marad a régi kódodból)
-                        val clubRow = Clubs.select { Clubs.id eq teamRow[Teams.clubId] }.single()
                         val membersList = (TeamMembers innerJoin Users)
                             .select { TeamMembers.teamId eq tId }
                             .map { memberRow ->
@@ -520,6 +522,7 @@ fun Application.module(db: Database) {
                                 )
                             }
 
+                        // Visszaadjuk az ÚJ, bővített DTO-t (Itt is frissíteni kell a DTOs.kt-ben!)
                         TeamWithMembersDTO(
                             teamId = tId,
                             teamName = teamRow[Teams.name],
@@ -535,9 +538,10 @@ fun Application.module(db: Database) {
                     }
                 }
                 call.respond(teamsResponse)
+
             } catch (e: Exception) {
-                appLog.error("Hiba: ${e.message}")
-                call.respond(HttpStatusCode.InternalServerError)
+                appLog.error("Hiba a /teams lekérdezésekor: ${e.message}", e)
+                call.respond(HttpStatusCode.InternalServerError, "Adatbázis hiba történt")
             }
         }
 
