@@ -485,19 +485,21 @@ fun Application.module(db: Database) {
                 val teamsResponse = transaction(db) {
                     Teams.selectAll().map { teamRow ->
                         val tId = teamRow[Teams.id].value
+                        val currentTeamEntityId = teamRow[Teams.id]
                         val clubRow = Clubs.select { Clubs.id eq teamRow[Teams.clubId] }.single()
 
-                        // --- ÚJ RÉSZ: Statisztikák lekérése a Matches táblából ---
                         val teamMatches = Matches.select {
-                            (Matches.homeTeamId eq tId) or (Matches.guestTeamId eq tId)
-                        }.filter { it[Matches.status] == "finished" }
+                        ((Matches.homeTeamId eq currentTeamEntityId) or (Matches.guestTeamId eq currentTeamEntityId)) and
+                                (Matches.status eq "finished")
+                        }.toList()
 
                         var wins = 0
                         var losses = 0
                         var draws = 0
 
                         teamMatches.forEach { row ->
-                            val isHome = row[Matches.homeTeamId].value == tId
+                            // Itt is EntityID-t hasonlítunk EntityID-hoz
+                            val isHome = row[Matches.homeTeamId] == currentTeamEntityId
                             val homeScore = row[Matches.homeTeamScore]
                             val guestScore = row[Matches.guestTeamScore]
 
@@ -509,7 +511,7 @@ fun Application.module(db: Database) {
                             }
                         }
 
-                        val points = (wins * 3) + (draws * 1) // 3 pont a győzelemért, 1 a döntetlenért
+                        val points = (wins * 2) + (draws * 1) // 3 pont a győzelemért, 1 a döntetlenért
                         // -----------------------------------------------------------
 
                         val membersList = (TeamMembers innerJoin Users)
