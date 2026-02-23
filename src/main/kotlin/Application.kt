@@ -25,6 +25,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.consumeEach
 import kotlinx.serialization.*
 import kotlinx.serialization.json.*
+import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.dao.id.IntIdTable
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
@@ -116,6 +117,36 @@ fun initDatabase(ds: HikariDataSource): Database {
     return db
 }
 
+// Segédfüggvény a szett pontszámok generálásához
+fun generateSetScore(): String {
+    val winPoints = if ((0..10).random() < 8) 11 else (12..15).random()
+    val lossPoints = if (winPoints == 11) (0..9).random() else winPoints - 2
+    return if ((0..1).random() == 0) "$winPoints-$lossPoints" else "$lossPoints-$winPoints"
+}
+
+// Segédfüggvény egy egyéni meccs (16/forduló) lejátszásához
+fun playIndividualMatch(matchId: EntityID<Int>, homePlayer: EntityID<Int>, guestPlayer: EntityID<Int>) {
+    var homeSets = 0
+    var guestSets = 0
+    val scores = mutableListOf<String>()
+
+    while (homeSets < 3 && guestSets < 3) {
+        val score = generateSetScore()
+        val parts = score.split("-")
+        if (parts[0].toInt() > parts[1].toInt()) homeSets++ else guestSets++
+        scores.add(score)
+    }
+
+    IndividualGames.insert {
+        it[IndividualGames.matchId] = matchId
+        it[homePlayerId] = homePlayer
+        it[guestPlayerId] = guestPlayer
+        it[homeSetsWon] = homeSets
+        it[guestSetsWon] = guestSets
+        it[setScores] = scores.joinToString(", ")
+    }
+}
+
 // TESZTADATOK BETÖLTÉSE
 fun seedDatabaseIfNeeded() {
     // Csak akkor töltjük fel, ha még nincsenek klubok
@@ -181,31 +212,56 @@ fun seedDatabaseIfNeeded() {
         }
     }
 
-    // 5. Fordulók és Meccsek létrehozása
-    val activeSeasonId = Seasons.select { Seasons.isActive eq true }.first()[Seasons.id]
+    val activeSeasonId = Seasons.selectAll().first()[Seasons.id]
 
-    val match1 = Matches.insertAndGetId {
-        it[seasonId] = activeSeasonId
-        it[roundNumber] = 1
-        it[homeTeamId] = mafc1
-        it[guestTeamId] = beac1
-        it[homeTeamScore] = 10
-        it[guestTeamScore] = 8
-        it[status] = "finished"
-        it[matchDate] = LocalDate.of(2026, 2, 15).atTime(18, 0)
-    }
+    // Definiáljuk a 4 nagy fordulót (Match a táblában)
+    val pairings = listOf(
+        Triple(beac1, mafc1, 1), // 1. Forduló: BEAC I - MAFC I
+        Triple(mafc1, beac1, 2), // 2. Forduló: MAFC I - BEAC I
+        Triple(beac2, mafc2, 3), // 3. Forduló: BEAC II - MAFC II
+        Triple(mafc2, beac2, 4)  // 4. Forduló: MAFC II - BEAC II
+    )
 
-    // Egyéni meccsek a fenti rangadóhoz
-    val mafcPlayerId = (TeamMembers innerJoin Users).select { TeamMembers.teamId eq mafc1 }.first()[Users.id]
-    val beacPlayerId = (TeamMembers innerJoin Users).select { TeamMembers.teamId eq beac1 }.first()[Users.id]
+    pairings.forEach { (homeId, guestId, roundNum) ->
+        // 1. Csapatmérkőzés létrehozása
+        val mId = Matches.insertAndGetId {
+            it[seasonId] = activeSeasonId
+            it[roundNumber] = roundNum
+            it[homeTeamId] = homeId
+            it[guestTeamId] = guestId
+            it[status] = "finished"
+            it[matchDate] = LocalDate.now().atStartOfDay()
+        }
 
-    IndividualGames.insert {
-        it[matchId] = match1
-        it[homePlayerId] = mafcPlayerId
-        it[guestPlayerId] = beacPlayerId
-        it[homeSetsWon] = 3
-        it[guestSetsWon] = 1
-        it[setScores] = "11-9, 11-7, 8-11, 11-5"
+        // 2. Játékosok lekérése a két csapatból
+        val homePlayers = TeamMembers.select { TeamMembers.teamId eq homeId }.map { it[TeamMembers.userId] }
+        val guestPlayers = TeamMembers.select { TeamMembers.teamId eq guestId }.map { it[TeamMembers.userId] }
+
+        // 3. Mindenki játszik mindenkivel (4x4 = 16 meccs)
+        var homeTeamTotal = 0
+        var guestTeamTotal = 0
+
+        for (hPlayer in homePlayers) {
+            for (gPlayer in guestPlayers) {
+                // Lejátszunk egy egyéni meccset
+                playIndividualMatch(mId, hPlayer, gPlayer)
+
+                // Itt egy egyszerűsített statisztikát számolunk a csapatnak
+                // (Később a backend a get/teams-nél ezt úgyis újraszámolja a sémád alapján)
+            }
+        }
+
+        // Frissítsük a csapat pontszámát (pl. hány egyéni győzelem született)
+        val homeWins = IndividualGames.select {
+            (IndividualGames.matchId eq mId) and (IndividualGames.homeSetsWon greater IndividualGames.guestSetsWon)
+        }.count().toInt()
+
+        val guestWins = 16 - homeWins
+
+        Matches.update({ Matches.id eq mId }) {
+            it[homeTeamScore] = homeWins
+            it[guestTeamScore] = guestWins
+        }
     }
 
     appLog.info("✅ Fordulók és egyéni meccsek betöltve!")
