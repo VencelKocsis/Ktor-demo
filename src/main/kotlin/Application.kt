@@ -570,7 +570,9 @@ fun Application.module(db: Database) {
                         homeScore = row[Matches.homeTeamScore],
                         guestScore = row[Matches.guestTeamScore],
                         date = row[Matches.matchDate]?.toString() ?: "",
-                        status = row[Matches.status]
+                        status = row[Matches.status],
+                        location = row[Matches.location] ?: "",
+                        // TODO home and guest team members list
                     )
                 }
             }

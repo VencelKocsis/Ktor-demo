@@ -32,7 +32,9 @@ data class MatchDTO(
     val homeScore: Int,
     val guestScore: Int,
     val date: String,
-    val status: String
+    val status: String,
+    val location: String,
+    // TODO home and guest team members list
 )
 
 @Serializable
