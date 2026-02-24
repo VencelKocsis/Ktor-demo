@@ -4,7 +4,7 @@ import org.jetbrains.exposed.dao.id.IntIdTable
 import org.jetbrains.exposed.sql.javatime.date
 import org.jetbrains.exposed.sql.javatime.datetime
 import org.jetbrains.exposed.sql.javatime.CurrentDateTime
-
+/*
 // --- FELHASZNÁLÓK ÉS JOGOSULTSÁGOK ---
 object Users : IntIdTable("users") {
     val email = varchar("email", 255).uniqueIndex()
@@ -67,3 +67,4 @@ object IndividualGames : IntIdTable("individual_games") {
     val guestSetsWon = integer("guest_sets_won").default(0)
     val setScores = text("set_scores").nullable()
 }
+*/ // TODO

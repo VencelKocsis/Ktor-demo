@@ -29,6 +29,7 @@ import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.dao.id.IntIdTable
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.javatime.date
 import org.jetbrains.exposed.sql.javatime.datetime
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.slf4j.LoggerFactory
@@ -38,7 +39,7 @@ import java.time.LocalDate
 
 // ---------------- DTO-k ----------------
 
-// ---------------- Exposed táblák ----------------
+// ---------------- EXPOSED TÁBLÁK DEFINÍCIÓI ----------------
 
 object Players : IntIdTable("players") {
     val name = varchar("name", 100)
@@ -52,7 +53,40 @@ object FcmTokens : Table("fcm_tokens") {
     override val primaryKey = PrimaryKey(email)
 }
 
-/*object Matches : IntIdTable("matches") {
+object Seasons : IntIdTable("seasons") {
+    val name = varchar("name", 100)
+    val startDate = date("start_date")
+    val endDate = date("end_date")
+    val isActive = bool("is_active").default(false)
+}
+
+object Clubs : IntIdTable("clubs") {
+    val name = varchar("name", 100)
+    val address = varchar("address", 255)
+}
+
+object Users : IntIdTable("users") {
+    val email = varchar("email", 100).uniqueIndex()
+    val passwordHash = varchar("password_hash", 255)
+    val firstName = varchar("first_name", 100)
+    val lastName = varchar("last_name", 100)
+    val role = varchar("role", 20).default("user")
+}
+
+object Teams : IntIdTable("teams") {
+    val clubId = reference("club_id", Clubs)
+    val name = varchar("name", 100)
+    val division = varchar("division", 50).nullable()
+}
+
+object TeamMembers : IntIdTable("team_members") {
+    val teamId = reference("team_id", Teams)
+    val userId = reference("user_id", Users)
+    val isCaptain = bool("is_captain").default(false)
+    val joinedAt = date("joined_at")
+}
+
+object Matches : IntIdTable("matches") {
     val seasonId = reference("season_id", Seasons)
     val roundNumber = integer("round_number")
     val homeTeamId = reference("home_team_id", Teams)
@@ -62,7 +96,7 @@ object FcmTokens : Table("fcm_tokens") {
     val matchDate = datetime("match_date").nullable()
     val status = varchar("status", 20).default("scheduled")
     val location = varchar("location", 255).nullable()
-}*/
+}
 
 object MatchParticipants : IntIdTable("match_participants") {
     val matchId = reference("match_id", Matches).index()
@@ -71,15 +105,15 @@ object MatchParticipants : IntIdTable("match_participants") {
     val status = varchar("status", 20).default("APPLIED") // 'APPLIED', 'SELECTED'
 }
 
-object IndividualMatches : IntIdTable("individual_matches") { // Vagy "match_games", attól függ mi lett a neve DBeaverben TODO
+object IndividualMatches : IntIdTable("individual_matches") {
     val matchId = reference("match_id", Matches).index()
-    val homePlayerName = varchar("home_player_name", 100) // Vagy ID, ha user_id-t tárolsz
+    val homePlayerName = varchar("home_player_name", 100)
     val guestPlayerName = varchar("guest_player_name", 100)
     val homeScore = integer("home_score").default(0)
     val guestScore = integer("guest_score").default(0)
-    // Ha User ID-t tároltál a seed-elésnél, akkor itt joinolni kell majd!
-    // A mostani példában string nevet feltételezünk az egyszerűség kedvéért,
-    // ahogy a DBeaver SQL scriptben csináltuk.
+    val homeSetsWon = integer("home_sets_won").default(0) // Ez hiányzott a seedeléshez
+    val guestSetsWon = integer("guest_sets_won").default(0) // Ez is
+    val setScores = varchar("set_scores", 100).nullable() // Ez is
 }
 
 // ---------------- WebSocket események ----------------
@@ -101,19 +135,12 @@ sealed class WsEvent {
     data class PlayerUpdated(val player: PlayerDTO) : WsEvent()
 }
 
-// ---------------- Adatbázis init ----------------
+// ---------------- DB Init ----------------
 
 fun initDataSource(): HikariDataSource {
-    val dbUrl = System.getenv("DB_URL")
-        ?: "jdbc:postgresql://localhost:5432/demo"
-
-    val dbUser = System.getenv("DB_USER")
-        ?: "demo"
-
-    val dbPassword = System.getenv("DB_PASSWORD")
-        ?: "demo"
-
-    appLog.info("DB_URL: $dbUrl")
+    val dbUrl = System.getenv("DB_URL") ?: "jdbc:postgresql://localhost:5432/demo"
+    val dbUser = System.getenv("DB_USER") ?: "demo"
+    val dbPassword = System.getenv("DB_PASSWORD") ?: "demo"
 
     val cfg = HikariConfig().apply {
         jdbcUrl = dbUrl
@@ -123,41 +150,31 @@ fun initDataSource(): HikariDataSource {
         maximumPoolSize = 3
         isAutoCommit = false
         transactionIsolation = "TRANSACTION_REPEATABLE_READ"
-
-        // Render SSL
-        addDataSourceProperty("sslmode", "require")
+        addDataSourceProperty("sslmode", "require") // Renderhez kell
     }
-
-    appLog.info("🌐 Adatbázis inicializálás elindult.")
     return HikariDataSource(cfg)
 }
 
 fun initDatabase(ds: HikariDataSource): Database {
     val db = Database.connect(ds)
-
-    // 1. Csak a táblákat hozzuk létre gyorsan
     transaction(db) {
         SchemaUtils.createMissingTablesAndColumns(
             Players, FcmTokens, Users, Clubs, Teams, TeamMembers, Seasons,
             Matches, IndividualGames, MatchParticipants
         )
     }
-    appLog.info("✅ Táblaszerkezet ellenőrizve.")
-
-    // A seedelést innen kivettük, majd a main-ben hívjuk meg!
-
     return db
 }
 
-// Segédfüggvény a szett pontszámok generálásához
+// ---------------- Logika / Seed ----------------
+
 fun generateSetScore(): String {
     val winPoints = if ((0..10).random() < 8) 11 else (12..15).random()
     val lossPoints = if (winPoints == 11) (0..9).random() else winPoints - 2
     return if ((0..1).random() == 0) "$winPoints-$lossPoints" else "$lossPoints-$winPoints"
 }
 
-// Segédfüggvény egy egyéni meccs (16/forduló) lejátszásához
-fun playIndividualMatch(matchId: EntityID<Int>, homePlayer: EntityID<Int>, guestPlayer: EntityID<Int>) {
+fun playIndividualMatch(matchId: EntityID<Int>, hPlayerUserId: EntityID<Int>, gPlayerUserId: EntityID<Int>) {
     var homeSets = 0
     var guestSets = 0
     val scores = mutableListOf<String>()
@@ -169,136 +186,71 @@ fun playIndividualMatch(matchId: EntityID<Int>, homePlayer: EntityID<Int>, guest
         scores.add(score)
     }
 
-    IndividualGames.insert {
-        it[IndividualGames.matchId] = matchId
-        it[homePlayerId] = homePlayer
-        it[guestPlayerId] = guestPlayer
+    // Itt most neveket generálunk ID helyett, hogy passzoljon a tábládhoz
+    // Valós appban itt User ID-t mentenénk, vagy lekérnénk a nevet.
+    // Egyszerűsítés: "Player ID" szöveg
+    IndividualMatches.insert {
+        it[IndividualMatches.matchId] = matchId
+        it[homePlayerName] = "User ${hPlayerUserId.value}"
+        it[guestPlayerName] = "User ${gPlayerUserId.value}"
+        it[homeScore] = homeSets // Itt a szett arányt mentjük pontnak
+        it[guestScore] = guestSets
         it[homeSetsWon] = homeSets
         it[guestSetsWon] = guestSets
         it[setScores] = scores.joinToString(", ")
     }
 }
 
-// TESZTADATOK BETÖLTÉSE
 fun seedDatabaseIfNeeded() {
-    // Csak akkor töltjük fel, ha még nincsenek klubok
-    if (Clubs.selectAll().count() > 0) {
-        return // Már fel van töltve
-    }
+    if (Clubs.selectAll().count() > 0) return
 
-    appLog.info("🌱 Tesztadatok betöltése folyamatban...")
+    appLog.info("🌱 Adatbázis feltöltése folyamatban...")
 
-    // 1. Szezonok
-    Seasons.insert {
-        it[name] = "2025 Ősz"
-        it[startDate] = LocalDate.of(2025, 9, 1)
-        it[endDate] = LocalDate.of(2025, 12, 15)
-        it[isActive] = false
-    }
-    Seasons.insert {
-        it[name] = "2026 Tavasz"
-        it[startDate] = LocalDate.of(2026, 2, 1)
-        it[endDate] = LocalDate.of(2026, 5, 31)
-        it[isActive] = true
-    }
+    Seasons.insert { it[name] = "2025 Ősz"; it[startDate] = LocalDate.of(2025, 9, 1); it[endDate] = LocalDate.of(2025, 12, 15); it[isActive] = false }
+    val activeSeasonId = Seasons.insertAndGetId { it[name] = "2026 Tavasz"; it[startDate] = LocalDate.of(2026, 2, 1); it[endDate] = LocalDate.of(2026, 5, 31); it[isActive] = true }
 
-    // 2. Klubok
-    val beacId = Clubs.insertAndGetId {
-        it[name] = "BEAC"
-        it[address] = "1117 Budapest, Bogdánfy u. 10."
-    }
-    val mafcId = Clubs.insertAndGetId {
-        it[name] = "MAFC"
-        it[address] = "1111 Budapest, Műegyetem rkp. 3."
-    }
+    val beacId = Clubs.insertAndGetId { it[name] = "BEAC"; it[address] = "1117 Budapest, Bogdánfy u. 10." }
+    val mafcId = Clubs.insertAndGetId { it[name] = "MAFC"; it[address] = "1111 Budapest, Műegyetem rkp. 3." }
 
-    // 3. Csapatok
     val beac1 = Teams.insertAndGetId { it[clubId] = beacId; it[name] = "BEAC I."; it[division] = "NB I." }
     val beac2 = Teams.insertAndGetId { it[clubId] = beacId; it[name] = "BEAC II."; it[division] = "Budapest I." }
     val mafc1 = Teams.insertAndGetId { it[clubId] = mafcId; it[name] = "MAFC I."; it[division] = "NB I." }
     val mafc2 = Teams.insertAndGetId { it[clubId] = mafcId; it[name] = "MAFC II."; it[division] = "Budapest I." }
 
-    // 4. Játékosok és Csapattagok generálása
     val teams = listOf(beac1, beac2, mafc1, mafc2)
     var userCounter = 1
 
     for (team in teams) {
         for (i in 1..4) {
-            val isCap = (i == 1) // Az első ember a csapatkapitány
-
-            val userId = Users.insertAndGetId {
-                it[email] = "player${userCounter}@test.com"
-                it[passwordHash] = "hashed_pw" // Később ezt igazira kell cserélni
-                it[firstName] = "Player"
-                it[lastName] = userCounter.toString()
-                it[role] = "user"
+            val uId = Users.insertAndGetId {
+                it[email] = "player${userCounter}@test.com"; it[passwordHash] = "pw"; it[firstName] = "Player"; it[lastName] = "$userCounter"
             }
-
-            TeamMembers.insert {
-                it[teamId] = team
-                it[this.userId] = userId
-                it[isCaptain] = isCap
-                it[joinedAt] = LocalDate.now()
-            }
+            TeamMembers.insert { it[teamId] = team; it[userId] = uId; it[isCaptain] = (i == 1); it[joinedAt] = LocalDate.now() }
             userCounter++
         }
     }
 
-    val activeSeasonId = Seasons.selectAll().first()[Seasons.id]
-
-    // Definiáljuk a 4 nagy fordulót (Match a táblában)
     val pairings = listOf(
-        Triple(beac1, mafc1, 1), // 1. Forduló: BEAC I - MAFC I
-        Triple(mafc1, beac1, 2), // 2. Forduló: MAFC I - BEAC I
-        Triple(beac2, mafc2, 3), // 3. Forduló: BEAC II - MAFC II
-        Triple(mafc2, beac2, 4)  // 4. Forduló: MAFC II - BEAC II
+        Triple(beac1, mafc1, 1), Triple(mafc1, beac1, 2),
+        Triple(beac2, mafc2, 3), Triple(mafc2, beac2, 4)
     )
 
-    pairings.forEach { (homeId, guestId, roundNum) ->
-        // 1. Csapatmérkőzés létrehozása
+    pairings.forEach { (hId, gId, round) ->
         val mId = Matches.insertAndGetId {
-            it[seasonId] = activeSeasonId
-            it[roundNumber] = roundNum
-            it[homeTeamId] = homeId
-            it[guestTeamId] = guestId
-            it[status] = "finished"
-            it[matchDate] = LocalDate.now().atStartOfDay()
+            it[seasonId] = activeSeasonId; it[roundNumber] = round; it[homeTeamId] = hId; it[guestTeamId] = gId
+            it[status] = "finished"; it[matchDate] = LocalDate.now().atStartOfDay().plusDays(round.toLong() * 7)
+            it[location] = "Sportcsarnok"
         }
 
-        // 2. Játékosok lekérése a két csapatból
-        val homePlayers = TeamMembers.select { TeamMembers.teamId eq homeId }.map { it[TeamMembers.userId] }
-        val guestPlayers = TeamMembers.select { TeamMembers.teamId eq guestId }.map { it[TeamMembers.userId] }
-
-        // 3. Mindenki játszik mindenkivel (4x4 = 16 meccs)
-        var homeTeamTotal = 0
-        var guestTeamTotal = 0
-
-        for (hPlayer in homePlayers) {
-            for (gPlayer in guestPlayers) {
-                // Lejátszunk egy egyéni meccset
-                playIndividualMatch(mId, hPlayer, gPlayer)
-
-                // Itt egy egyszerűsített statisztikát számolunk a csapatnak
-                // (Később a backend a get/teams-nél ezt úgyis újraszámolja a sémád alapján)
-            }
-        }
-
-        // Frissítsük a csapat pontszámát (pl. hány egyéni győzelem született)
-        val homeWins = IndividualGames.select {
-            (IndividualGames.matchId eq mId) and (IndividualGames.homeSetsWon greater IndividualGames.guestSetsWon)
-        }.count().toInt()
-
-        val guestWins = 16 - homeWins
-
+        // Csak placeholder eredmény generálás, hogy ne legyen üres
+        val hScore = (5..10).random()
+        val gScore = (5..10).random()
         Matches.update({ Matches.id eq mId }) {
-            it[homeTeamScore] = homeWins
-            it[guestTeamScore] = guestWins
+            it[homeTeamScore] = hScore
+            it[guestTeamScore] = gScore
         }
     }
-
-    appLog.info("✅ Fordulók és egyéni meccsek betöltve!")
-
-    appLog.info("✅ Tesztadatok (Klubok, Csapatok, Játékosok) sikeresen betöltve!")
+    appLog.info("✅ Adatbázis feltöltve!")
 }
 
 // ---------------- Globális változók ----------------
@@ -356,33 +308,22 @@ fun savePlayer(db: Database, player: NewPlayerDTO): PlayerDTO {
 fun main() {
     val ds = initDataSource()
     val db = initDatabase(ds)
-
-    // A Render a PORT környezeti változóban adja meg a portot.
-    // Ha nincs (pl. lokálban), akkor 8080.
     val port = System.getenv("PORT")?.toIntOrNull() ?: 8080
 
-    embeddedServer(Netty, port = port, host = "0.0.0.0") { // FONTOS: host = "0.0.0.0"
+    // HOST = 0.0.0.0 kötelező Renderhez!
+    embeddedServer(Netty, port = port, host = "0.0.0.0") {
 
-        // --- ADATBÁZIS FELTÖLTÉS HÁTTÉRBEN ---
-        // Így a szerver azonnal elindul, nem várja meg a 60+ insertet
+        // A háttérben töltünk, hogy a szerver azonnal indulhasson (No open ports hiba ellen)
         launch(Dispatchers.IO) {
             try {
-                // Mivel a seedDatabaseIfNeeded-ben insert-ek vannak,
-                // azoknak tranzakcióban kell futniuk.
-                transaction(db) {
-                    seedDatabaseIfNeeded()
-                }
+                transaction(db) { seedDatabaseIfNeeded() }
             } catch (e: Exception) {
-                appLog.error("❌ Hiba az adatbázis feltöltésekor: ${e.message}")
-                e.printStackTrace()
+                appLog.error("Hiba a seedelésnél: ${e.message}")
             }
         }
 
         module(db)
     }.start(wait = true)
-
-    // Ez a sor technikailag sosem fut le a wait=true miatt,
-    // de a logokban látni fogod a Netty indulását.
 }
 
 // ---------------- Application modul ----------------

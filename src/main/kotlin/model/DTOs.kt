@@ -2,6 +2,34 @@ package hu.bme.aut.android.demo.model
 
 import kotlinx.serialization.Serializable
 
+// --- SZEZONOK ---
+@Serializable
+data class SeasonDTO(
+    val id: Int,
+    val name: String,
+    val startDate: String,
+    val endDate: String,
+    val isActive: Boolean
+)
+
+// --- KLUBOK ---
+@Serializable
+data class ClubDTO(
+    val id: Int,
+    val name: String,
+    val address: String
+)
+
+// --- FELHASZNÁLÓK ---
+@Serializable
+data class UserDTO(
+    val id: Int,
+    val email: String,
+    val firstName: String,
+    val lastName: String
+    // Jelszót soha nem küldünk ki DTO-ban!
+)
+
 @Serializable
 data class TeamWithMembersDTO(
     val teamId: Int,
