@@ -134,17 +134,17 @@ fun initDataSource(): HikariDataSource {
 
 fun initDatabase(ds: HikariDataSource): Database {
     val db = Database.connect(ds)
-    transaction(db) {
-        // LÉTREHOZZUK AZ ÖSSZES TÁBLÁT
-        SchemaUtils.createMissingTablesAndColumns(Players, FcmTokens, // régiek
-            Users, Clubs, Teams, TeamMembers, Seasons, Matches, IndividualGames, MatchParticipants,
-            IndividualMatches // Az újak
-        )
 
-        // 2. BETÖLTJÜK A TESZTADATOKAT (Ha a tábla még üres)
-        seedDatabaseIfNeeded()
+    // 1. Csak a táblákat hozzuk létre gyorsan
+    transaction(db) {
+        SchemaUtils.createMissingTablesAndColumns(
+            Players, FcmTokens, Users, Clubs, Teams, TeamMembers, Seasons,
+            Matches, IndividualGames, MatchParticipants
+        )
     }
-    appLog.info("✅ Adatbázis sikeresen inicializálva és táblák ellenőrizve.")
+    appLog.info("✅ Táblaszerkezet ellenőrizve.")
+
+    // A seedelést innen kivettük, majd a main-ben hívjuk meg!
 
     return db
 }
@@ -357,14 +357,32 @@ fun main() {
     val ds = initDataSource()
     val db = initDatabase(ds)
 
-    // --- Port dinamikus beolvasása ---
-    // A Render.com a "PORT" környezeti változóban mondja meg, hol kell futnia az appnak.
+    // A Render a PORT környezeti változóban adja meg a portot.
+    // Ha nincs (pl. lokálban), akkor 8080.
     val port = System.getenv("PORT")?.toIntOrNull() ?: 8080
 
-    embeddedServer(Netty, port = port, host = "0.0.0.0") {
+    embeddedServer(Netty, port = port, host = "0.0.0.0") { // FONTOS: host = "0.0.0.0"
+
+        // --- ADATBÁZIS FELTÖLTÉS HÁTTÉRBEN ---
+        // Így a szerver azonnal elindul, nem várja meg a 60+ insertet
+        launch(Dispatchers.IO) {
+            try {
+                // Mivel a seedDatabaseIfNeeded-ben insert-ek vannak,
+                // azoknak tranzakcióban kell futniuk.
+                transaction(db) {
+                    seedDatabaseIfNeeded()
+                }
+            } catch (e: Exception) {
+                appLog.error("❌ Hiba az adatbázis feltöltésekor: ${e.message}")
+                e.printStackTrace()
+            }
+        }
+
         module(db)
     }.start(wait = true)
-    appLog.info("🚀 Ktor szerver elindult a $port-as porton.") // Log szerver induláskor
+
+    // Ez a sor technikailag sosem fut le a wait=true miatt,
+    // de a logokban látni fogod a Netty indulását.
 }
 
 // ---------------- Application modul ----------------
