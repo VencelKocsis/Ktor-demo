@@ -34,7 +34,25 @@ data class MatchDTO(
     val date: String,
     val status: String,
     val location: String,
-    // TODO home and guest team members list
+    val individualMatches: List<IndividualMatchDTO>? = null,
+    val participants: List<MatchParticipantDTO>? = null
+)
+
+@Serializable
+data class IndividualMatchDTO(
+    val id: Int,
+    val homePlayerName: String, // TODO user id alapján nevet lekérése
+    val guestPlayerName: String, // TODO user id alapján nevet lekérése
+    val homeScore: Int,
+    val guestScore: Int
+)
+
+@Serializable
+data class MatchParticipantDTO(
+    val id: Int,
+    val playerName: String, // TODO user id alapján nevet lekérése
+    val teamSide: String, // "HOME" vagy "GUEST"
+    val status: String    // "APPLIED" vagy "SELECTED"
 )
 
 @Serializable

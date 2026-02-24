@@ -29,6 +29,7 @@ import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.dao.id.IntIdTable
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.javatime.datetime
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.slf4j.LoggerFactory
 import java.io.ByteArrayInputStream
@@ -49,6 +50,36 @@ object FcmTokens : Table("fcm_tokens") {
     val email = varchar("email", 150).uniqueIndex()
     val token = text("token")
     override val primaryKey = PrimaryKey(email)
+}
+
+/*object Matches : IntIdTable("matches") {
+    val seasonId = reference("season_id", Seasons)
+    val roundNumber = integer("round_number")
+    val homeTeamId = reference("home_team_id", Teams)
+    val guestTeamId = reference("guest_team_id", Teams)
+    val homeTeamScore = integer("home_team_score").default(0)
+    val guestTeamScore = integer("guest_team_score").default(0)
+    val matchDate = datetime("match_date").nullable()
+    val status = varchar("status", 20).default("scheduled")
+    val location = varchar("location", 255).nullable()
+}*/
+
+object MatchParticipants : IntIdTable("match_participants") {
+    val matchId = reference("match_id", Matches).index()
+    val playerName = varchar("player_name", 100)
+    val teamSide = varchar("team_side", 10) // 'HOME', 'GUEST'
+    val status = varchar("status", 20).default("APPLIED") // 'APPLIED', 'SELECTED'
+}
+
+object IndividualMatches : IntIdTable("individual_matches") { // Vagy "match_games", attól függ mi lett a neve DBeaverben TODO
+    val matchId = reference("match_id", Matches).index()
+    val homePlayerName = varchar("home_player_name", 100) // Vagy ID, ha user_id-t tárolsz
+    val guestPlayerName = varchar("guest_player_name", 100)
+    val homeScore = integer("home_score").default(0)
+    val guestScore = integer("guest_score").default(0)
+    // Ha User ID-t tároltál a seed-elésnél, akkor itt joinolni kell majd!
+    // A mostani példában string nevet feltételezünk az egyszerűség kedvéért,
+    // ahogy a DBeaver SQL scriptben csináltuk.
 }
 
 // ---------------- WebSocket események ----------------
@@ -106,7 +137,8 @@ fun initDatabase(ds: HikariDataSource): Database {
     transaction(db) {
         // LÉTREHOZZUK AZ ÖSSZES TÁBLÁT
         SchemaUtils.createMissingTablesAndColumns(Players, FcmTokens, // régiek
-            Users, Clubs, Teams, TeamMembers, Seasons, Matches, IndividualGames // Az újak
+            Users, Clubs, Teams, TeamMembers, Seasons, Matches, IndividualGames, MatchParticipants,
+            IndividualMatches // Az újak
         )
 
         // 2. BETÖLTJÜK A TESZTADATOKAT (Ha a tábla még üres)
@@ -557,22 +589,47 @@ fun Application.module(db: Database) {
                     Matches.selectAll()
                 }
 
-                query.map { row ->
+                query.map { matchRow ->
+                    val mId = matchRow[Matches.id].value
+
                     // Csapatnevek lekérése az ID-k alapján
-                    val homeName = Teams.select { Teams.id eq row[Matches.homeTeamId] }.single()[Teams.name]
-                    val guestName = Teams.select { Teams.id eq row[Matches.guestTeamId] }.single()[Teams.name]
+                    val homeName = Teams.select { Teams.id eq matchRow[Matches.homeTeamId] }.single()[Teams.name]
+                    val guestName = Teams.select { Teams.id eq matchRow[Matches.guestTeamId] }.single()[Teams.name]
+
+                    // --- 2. EGYÉNI MECCSEK LEKÉRÉSE (individualMatches) ---
+                    // Csak akkor van értelme, ha finished
+                    val individualMatches = IndividualMatches.select { IndividualMatches.matchId eq mId }.map { imRow ->
+                        IndividualMatchDTO(
+                            id = imRow[IndividualMatches.id].value,
+                            homePlayerName = imRow[IndividualMatches.homePlayerName],
+                            guestPlayerName = imRow[IndividualMatches.guestPlayerName],
+                            homeScore = imRow[IndividualMatches.homeScore],
+                            guestScore = imRow[IndividualMatches.guestScore]
+                        )
+                    }
+
+                    // --- 3. RÉSZTVEVŐK LEKÉRÉSE (participants) ---
+                    val participants = MatchParticipants.select { MatchParticipants.matchId eq mId }.map { mpRow ->
+                        MatchParticipantDTO(
+                            id = mpRow[MatchParticipants.id].value,
+                            playerName = mpRow[MatchParticipants.playerName],
+                            teamSide = mpRow[MatchParticipants.teamSide],
+                            status = mpRow[MatchParticipants.status]
+                        )
+                    }
 
                     MatchDTO(
-                        id = row[Matches.id].value,
-                        roundNumber = row[Matches.roundNumber] ?: 0,
+                        id = matchRow[Matches.id].value,
+                        roundNumber = matchRow[Matches.roundNumber] ?: 0,
                         homeTeamName = homeName,
                         guestTeamName = guestName,
-                        homeScore = row[Matches.homeTeamScore],
-                        guestScore = row[Matches.guestTeamScore],
-                        date = row[Matches.matchDate]?.toString() ?: "",
-                        status = row[Matches.status],
-                        location = row[Matches.location] ?: "",
-                        // TODO home and guest team members list
+                        homeScore = matchRow[Matches.homeTeamScore],
+                        guestScore = matchRow[Matches.guestTeamScore],
+                        date = matchRow[Matches.matchDate]?.toString() ?: "",
+                        status = matchRow[Matches.status],
+                        location = matchRow[Matches.location] ?: "",
+                        individualMatches = individualMatches,
+                        participants = participants
                     )
                 }
             }
