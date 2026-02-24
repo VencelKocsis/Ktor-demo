@@ -160,7 +160,7 @@ fun initDatabase(ds: HikariDataSource): Database {
     transaction(db) {
         SchemaUtils.createMissingTablesAndColumns(
             Players, FcmTokens, Users, Clubs, Teams, TeamMembers, Seasons,
-            Matches, IndividualGames, MatchParticipants
+            Matches, IndividualMatches, MatchParticipants
         )
     }
     return db
