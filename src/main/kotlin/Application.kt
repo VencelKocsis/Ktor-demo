@@ -439,6 +439,42 @@ fun Application.module(db: Database) {
 
                 call.respond(HttpStatusCode.OK, savedUser)
             }
+
+            put("/auth/me") {
+                // Biztonság: Csak a saját magát szerkesztheti a token alapján!
+                val principal = call.principal<UserIdPrincipal>()
+                val firebaseUid = principal?.name ?: return@put call.respond(HttpStatusCode.Unauthorized)
+
+                val updatedData = call.receive<UserDTO>()
+
+                val updatedUser = transaction(db) {
+                    // Frissítjük a kereszt- és vezetéknevet
+                    val rowsAffected = Users.update({ Users.firebaseUid eq firebaseUid }) {
+                        it[firstName] = updatedData.firstName
+                        it[lastName] = updatedData.lastName
+                        // Az emailt itt szándékosan nem frissítjük, azt a Firebase kezeli!
+                    }
+
+                    // Ha sikeres volt a frissítés, lekérjük a friss adatokat
+                    if (rowsAffected > 0) {
+                        val row = Users.select { Users.firebaseUid eq firebaseUid }.single()
+                        UserDTO(
+                            id = row[Users.id].value,
+                            email = row[Users.email],
+                            firstName = row[Users.firstName],
+                            lastName = row[Users.lastName]
+                        )
+                    } else {
+                        null
+                    }
+                }
+
+                if (updatedUser != null) {
+                    call.respond(HttpStatusCode.OK, updatedUser)
+                } else {
+                    call.respond(HttpStatusCode.NotFound, "Felhasználó nem található")
+                }
+            }
         }
 
         // ---------------- FCM üzenet küldés ----------------
