@@ -36,6 +36,8 @@ import org.slf4j.LoggerFactory
 import java.io.ByteArrayInputStream
 import java.time.Duration
 import java.time.LocalDate
+import io.ktor.server.auth.*
+import com.google.firebase.auth.FirebaseAuth as FirebaseAdminAuth
 
 // ---------------- DTO-k ----------------
 
@@ -66,8 +68,8 @@ object Clubs : IntIdTable("clubs") {
 }
 
 object Users : IntIdTable("users") {
+    val firebaseUid = varchar("firebase_uid", 128).uniqueIndex()
     val email = varchar("email", 100).uniqueIndex()
-    val passwordHash = varchar("password_hash", 255)
     val firstName = varchar("first_name", 100)
     val lastName = varchar("last_name", 100)
     val role = varchar("role", 20).default("user")
@@ -223,7 +225,7 @@ fun seedDatabaseIfNeeded() {
     for (team in teams) {
         for (i in 1..4) {
             val uId = Users.insertAndGetId {
-                it[email] = "player${userCounter}@test.com"; it[passwordHash] = "pw"; it[firstName] = "Player"; it[lastName] = "$userCounter"
+                it[firebaseUid] = "dummyUid$userCounter" ; it[email] = "player${userCounter}@test.com"; it[firstName] = "Player"; it[lastName] = "$userCounter"
             }
             TeamMembers.insert { it[teamId] = team; it[userId] = uId; it[isCaptain] = (i == 1); it[joinedAt] = LocalDate.now() }
             userCounter++
@@ -239,10 +241,10 @@ fun seedDatabaseIfNeeded() {
         val mId = Matches.insertAndGetId {
             it[seasonId] = activeSeasonId; it[roundNumber] = round; it[homeTeamId] = hId; it[guestTeamId] = gId
             it[status] = "finished"; it[matchDate] = LocalDate.now().atStartOfDay().plusDays(round.toLong() * 7)
-            it[location] = "Sportcsarnok"
+            it[matchDate] = LocalDate.now().plusDays(round.toLong() * 7).atTime(18, 30)
+            it[location] = "Budapest, Mérnök u. 35, 1119"
         }
 
-        // Csak placeholder eredmény generálás, hogy ne legyen üres
         val hScore = (5..10).random()
         val gScore = (5..10).random()
         Matches.update({ Matches.id eq mId }) {
@@ -345,6 +347,23 @@ fun Application.module(db: Database) {
     }
 
     install(ContentNegotiation) { json() }
+    install(Authentication) {
+        bearer("firebase-auth") {
+            authenticate { tokenCredential ->
+                try {
+                    // A Firebase SDK leellenőrzi a tokent (lejárt-e, hamisították-e)
+                    val decodedToken = FirebaseAdminAuth.getInstance().verifyIdToken(tokenCredential.token)
+
+                    // Ha sikeres, visszaadjuk a felhasználó azonosítóját a Ktornak
+                    UserIdPrincipal(decodedToken.uid)
+                } catch (e: Exception) {
+                    // Ha a token érvénytelen, 401 Unauthorized hibát kap a kliens
+                    appLog.warn("Érvénytelen token: ${e.message}")
+                    null
+                }
+            }
+        }
+    }
     install(WebSockets) {
         pingPeriod = Duration.ofSeconds(10)
         timeout = Duration.ofSeconds(60)
@@ -354,6 +373,45 @@ fun Application.module(db: Database) {
     val json = Json { classDiscriminator = "type"; encodeDefaults = true }
 
     routing {
+        // --- REGISZTRÁCIÓ SZINKRONIZÁLÁSA (Ide jön a Firebase token alapján a user) ---
+        authenticate("firebase-auth") {
+            post("/auth/sync") {
+                // Ezt az azonosítót a tokenből olvassuk ki, így NEM LEHET MEGHAMISÍTANI
+                val principal = call.principal<UserIdPrincipal>()
+                val firebaseUid = principal?.name ?: return@post call.respond(HttpStatusCode.Unauthorized)
+
+                // Várjuk az Androidtól a regisztrált adatokat (pl. név)
+                val newUserData = call.receive<UserDTO>()
+
+                val savedUser = transaction(db) {
+                    // Megnézzük, létezik-e már (ha csak bejelentkezett, nem kell újra beszúrni)
+                    val existingUser = Users.select { Users.firebaseUid eq firebaseUid }.singleOrNull()
+
+                    if (existingUser == null) {
+                        // Ha új user, beszúrjuk az adatbázisba
+                        val id = Users.insertAndGetId {
+                            it[Users.firebaseUid] = firebaseUid
+                            it[email] = newUserData.email
+                            it[firstName] = newUserData.firstName
+                            it[lastName] = newUserData.lastName
+                        }.value
+
+                        UserDTO(id, newUserData.email, newUserData.firstName, newUserData.lastName)
+                    } else {
+                        // Ha már létezik, visszaadjuk a meglévőt
+                        UserDTO(
+                            existingUser[Users.id].value,
+                            existingUser[Users.email],
+                            existingUser[Users.firstName],
+                            existingUser[Users.lastName]
+                        )
+                    }
+                }
+
+                call.respond(HttpStatusCode.OK, savedUser)
+            }
+        }
+
         // ---------------- FCM üzenet küldés ----------------
         post("/send_fcm_notification") {
             val request = call.receive<SendNotificationRequest>()

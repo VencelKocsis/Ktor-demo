@@ -33,6 +33,7 @@ dependencies {
 
     // Firebase Admin SDK a Push értesítésekhez
     implementation(libs.firebase.admin)
+    implementation(libs.ktor.server.auth)
 
     // Adatbázis (HikariCP + Exposed + PostgreSQL)
     implementation(libs.exposed.core)
