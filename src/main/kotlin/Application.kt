@@ -238,11 +238,40 @@ fun seedDatabaseIfNeeded() {
     )
 
     pairings.forEach { (hId, gId, round) ->
+        // 1. Meccs létrehozása (időponttal)
         val mId = Matches.insertAndGetId {
             it[seasonId] = activeSeasonId; it[roundNumber] = round; it[homeTeamId] = hId; it[guestTeamId] = gId
             it[status] = "finished"; it[matchDate] = LocalDate.now().atStartOfDay().plusDays(round.toLong() * 7)
             it[matchDate] = LocalDate.now().plusDays(round.toLong() * 7).atTime(18, 30)
             it[location] = "Budapest, Mérnök u. 35, 1119"
+        }
+
+        // 2. Hazai csapat játékosainak lekérése és hozzáadása résztvevőként
+        val homePlayers = (TeamMembers innerJoin Users)
+            .select { TeamMembers.teamId eq hId }
+            .map { "${it[Users.lastName]} ${it[Users.firstName]}" }
+
+        homePlayers.forEach { pName ->
+            MatchParticipants.insert {
+                it[matchId] = mId
+                it[playerName] = pName
+                it[teamSide] = "HOME"
+                it[status] = "SELECTED" // Vagy "APPLIED", ha még csak jelentkezett
+            }
+        }
+
+        // 3. Vendég csapat játékosainak lekérése és hozzáadása résztvevőként
+        val guestPlayers = (TeamMembers innerJoin Users)
+            .select { TeamMembers.teamId eq gId }
+            .map { "${it[Users.lastName]} ${it[Users.firstName]}" }
+
+        guestPlayers.forEach { pName ->
+            MatchParticipants.insert {
+                it[matchId] = mId
+                it[playerName] = pName
+                it[teamSide] = "GUEST"
+                it[status] = "SELECTED"
+            }
         }
 
         val hScore = (5..10).random()
