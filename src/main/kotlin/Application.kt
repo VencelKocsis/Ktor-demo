@@ -633,6 +633,7 @@ fun Application.module(db: Database) {
                             .map { memberRow ->
                                 MemberDTO(
                                     userId = memberRow[Users.id].value,
+                                    firebaseUid = memberRow[Users.firebaseUid],
                                     name = "${memberRow[Users.lastName]} ${memberRow[Users.firstName]}",
                                     isCaptain = memberRow[TeamMembers.isCaptain]
                                 )
