@@ -45,6 +45,16 @@ data class TeamWithMembersDTO(
 )
 
 @Serializable
+data class TeamUpdateDTO(
+    val name: String
+)
+
+@Serializable
+data class TeamMemberOperationDTO(
+    val userId: Int
+)
+
+@Serializable
 data class MemberDTO(
     val userId: Int,
     val firebaseUid: String,

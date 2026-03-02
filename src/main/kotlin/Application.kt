@@ -719,6 +719,85 @@ fun Application.module(db: Database) {
             call.respond(matches)
         }
 
+        // --- 1. CSAPAT NEVÉNEK MÓDOSÍTÁSA (PUT) ---
+        put("/teams/{id}") {
+            val teamId = call.parameters["id"]?.toIntOrNull()
+                ?: return@put call.respond(HttpStatusCode.BadRequest, "Érvénytelen csapat ID")
+
+            val updateData = call.receive<TeamUpdateDTO>()
+
+            val rowsAffected = transaction(db) {
+                Teams.update({ Teams.id eq teamId }) {
+                    it[name] = updateData.name
+                }
+            }
+
+            if (rowsAffected > 0) {
+                call.respond(HttpStatusCode.OK, mapOf("status" to "updated", "newName" to updateData.name))
+            } else {
+                call.respond(HttpStatusCode.NotFound, "Csapat nem található")
+            }
+        }
+
+        // --- 2. SZABAD JÁTÉKOSOK LEKÉRÉSE (GET) ---
+        // Azok a userek kellenek, akiknek az ID-ja NINCS benne a team_members táblában
+        get("/users/available") {
+            val availableUsers = transaction(db) {
+                // Készítünk egy lekérdezést, ami visszaadja az összes olyan user ID-t, aki már csapatban van
+                val usersInTeams = TeamMembers.slice(TeamMembers.userId).selectAll()
+
+                // Csak azokat a usereket kérjük le, akik nincsenek benne a fenti listában
+                Users.select { Users.id notInSubQuery usersInTeams }
+                    .map { row ->
+                        MemberDTO(
+                            userId = row[Users.id].value,
+                            firebaseUid = row[Users.firebaseUid],
+                            name = "${row[Users.lastName]} ${row[Users.firstName]}",
+                            isCaptain = false
+                        )
+                    }
+            }
+            call.respond(HttpStatusCode.OK, availableUsers)
+        }
+
+        // --- 3. ÚJ TAG HOZZÁADÁSA A CSAPATHOZ (POST) ---
+        post("/teams/{id}/members") {
+            val teamId = call.parameters["id"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest, "Érvénytelen csapat ID")
+
+            val request = call.receive<TeamMemberOperationDTO>()
+
+            transaction(db) {
+                TeamMembers.insert {
+                    it[this.teamId] = teamId
+                    it[userId] = request.userId
+                    it[isCaptain] = false // Az új tag alapból sima játékos
+                    it[joinedAt] = LocalDate.now()
+                }
+            }
+            call.respond(HttpStatusCode.Created, mapOf("status" to "added"))
+        }
+
+        // --- 4. TAG ELTÁVOLÍTÁSA A CSAPATBÓL (DELETE) ---
+        delete("/teams/{teamId}/members/{userId}") {
+            val teamId = call.parameters["teamId"]?.toIntOrNull()
+                ?: return@delete call.respond(HttpStatusCode.BadRequest, "Érvénytelen csapat ID")
+            val userId = call.parameters["userId"]?.toIntOrNull()
+                ?: return@delete call.respond(HttpStatusCode.BadRequest, "Érvénytelen user ID")
+
+            val rowsDeleted = transaction(db) {
+                TeamMembers.deleteWhere {
+                    (TeamMembers.teamId eq teamId) and (TeamMembers.userId eq userId)
+                }
+            }
+
+            if (rowsDeleted > 0) {
+                call.respond(HttpStatusCode.OK, mapOf("status" to "deleted"))
+            } else {
+                call.respond(HttpStatusCode.NotFound, "A játékos nem található ebben a csapatban")
+            }
+        }
+
         // ---------------- WebSocket ----------------
         webSocket("/ws/players") {
             appLog.info("🔗 Új WebSocket kliens csatlakozott. Jelenlegi kliensek száma: ${clients.size + 1}")
