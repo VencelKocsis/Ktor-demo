@@ -78,6 +78,11 @@ data class MatchDTO(
 )
 
 @Serializable
+data class ParticipantStatusUpdateDTO(
+    val status: String
+)
+
+@Serializable
 data class IndividualMatchDTO(
     val id: Int,
     val homePlayerName: String, // TODO user id alapján nevet lekérése

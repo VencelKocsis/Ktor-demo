@@ -512,6 +512,7 @@ fun Application.module(db: Database) {
         }
 
         // ---------------- Játékos CRUD ----------------
+        // --- DEMO ---
         get("/players") {
             val players = transaction(db) {
                 Players.selectAll().map {
@@ -590,6 +591,8 @@ fun Application.module(db: Database) {
 
             call.respond(HttpStatusCode.OK)
         }
+
+        // --- APP ---
 
         // Ktor Backend - Application.kt vagy Routing.kt
         get("/teams") {
@@ -795,6 +798,91 @@ fun Application.module(db: Database) {
                 call.respond(HttpStatusCode.OK, mapOf("status" to "deleted"))
             } else {
                 call.respond(HttpStatusCode.NotFound, "A játékos nem található ebben a csapatban")
+            }
+        }
+
+        post("matches/{matchId}/apply") {
+            val principal = call.principal<UserIdPrincipal>()
+            val firebaseUid = principal?.name ?: return@post call.respond(HttpStatusCode.Unauthorized)
+
+            val matchId = call.parameters["matchId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest, "Érvénytelen meccs ID")
+
+            // Létrehozunk egy párost a válasz kódjához és az üzenethez
+            val result: Pair<HttpStatusCode, Any> = transaction(db) {
+                // 1. Megkeressük a usert
+                val userRow = Users.select { Users.firebaseUid eq firebaseUid }.singleOrNull()
+                if (userRow == null) return@transaction Pair(HttpStatusCode.NotFound, "User nem található")
+
+                val userId = userRow[Users.id]
+                val userName = "${userRow[Users.lastName]} ${userRow[Users.firstName]}"
+
+                // 2. Megkeressük a meccset
+                val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull()
+                if (matchRow == null) return@transaction Pair(HttpStatusCode.NotFound, "Meccs nem található")
+
+                // 3. Megnézzük, hogy a user a hazai vagy a vendég csapat tagja-e
+                val isHomeTeamMember = TeamMembers.select {
+                    (TeamMembers.teamId eq matchRow[Matches.homeTeamId]) and (TeamMembers.userId eq userId)
+                }.count() > 0
+
+                val isGuestTeamMember = TeamMembers.select {
+                    (TeamMembers.teamId eq matchRow[Matches.guestTeamId]) and (TeamMembers.userId eq userId)
+                }.count() > 0
+
+                val teamSide = when {
+                    isHomeTeamMember -> "HOME"
+                    isGuestTeamMember -> "GUEST"
+                    else -> return@transaction Pair(HttpStatusCode.Forbidden, "Nem vagy tagja egyik csapatnak sem!")
+                }
+
+                // 4. Ellenőrizzük, hogy nem jelentkezett-e már
+                val alreadyApplied = MatchParticipants.select {
+                    (MatchParticipants.matchId eq matchId) and (MatchParticipants.playerName eq userName)
+                }.count() > 0
+
+                if (alreadyApplied) {
+                    return@transaction Pair(HttpStatusCode.Conflict, "Már jelentkeztél erre a meccsre!")
+                }
+
+                // 5. Beszúrás
+                MatchParticipants.insert {
+                    it[MatchParticipants.matchId] = matchId
+                    it[MatchParticipants.playerName] = userName
+                    it[MatchParticipants.teamSide] = teamSide
+                    it[MatchParticipants.status] = "APPLIED"
+                }
+
+                // Sikeres lefutás
+                Pair(HttpStatusCode.OK, mapOf("status" to "applied"))
+            }
+
+            // A transaction blokk véget ért, itt már biztonságosan hívható a suspend function
+            call.respond(result.first, result.second)
+        }
+
+        put("/matches/participants/{participantId}/status") {
+            val principal = call.principal<UserIdPrincipal>()
+            val firebaseUid = principal?.name ?: return@put call.respond(HttpStatusCode.Unauthorized)
+
+            val participantId = call.parameters["participantId"]?.toIntOrNull()
+                ?: return@put call.respond(HttpStatusCode.BadRequest, "Érvénytelen jelentkezési ID")
+
+            val request = call.receive<ParticipantStatusUpdateDTO>()
+
+            // A transaction visszadja a módosított sorok számát
+            val rowsUpdated = transaction(db) {
+                MatchParticipants.update({ MatchParticipants.id eq participantId }) {
+                    it[status] = request.status
+                }
+            }
+
+            // A kiértékelést és a választ a blokkon kívül végezzük
+            if (rowsUpdated > 0) {
+                // TODO SIKER! Később ide tesszük be a Push Notification küldést!
+                call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
+            } else {
+                call.respond(HttpStatusCode.NotFound, "Jelentkezési adat nem található")
             }
         }
 
