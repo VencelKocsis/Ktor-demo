@@ -39,8 +39,6 @@ import java.time.LocalDate
 import io.ktor.server.auth.*
 import com.google.firebase.auth.FirebaseAuth as FirebaseAdminAuth
 
-// ---------------- DTO-k ----------------
-
 // ---------------- EXPOSED TÁBLÁK DEFINÍCIÓI ----------------
 
 object Players : IntIdTable("players") {
@@ -113,9 +111,9 @@ object IndividualMatches : IntIdTable("individual_matches") {
     val guestPlayerName = varchar("guest_player_name", 100)
     val homeScore = integer("home_score").default(0)
     val guestScore = integer("guest_score").default(0)
-    val homeSetsWon = integer("home_sets_won").default(0) // Ez hiányzott a seedeléshez
-    val guestSetsWon = integer("guest_sets_won").default(0) // Ez is
-    val setScores = varchar("set_scores", 100).nullable() // Ez is
+    val homeSetsWon = integer("home_sets_won").default(0)
+    val guestSetsWon = integer("guest_sets_won").default(0)
+    val setScores = varchar("set_scores", 100).nullable()
 }
 
 // ---------------- WebSocket események ----------------
@@ -188,14 +186,11 @@ fun playIndividualMatch(matchId: EntityID<Int>, hPlayerUserId: EntityID<Int>, gP
         scores.add(score)
     }
 
-    // Itt most neveket generálunk ID helyett, hogy passzoljon a tábládhoz
-    // Valós appban itt User ID-t mentenénk, vagy lekérnénk a nevet.
-    // Egyszerűsítés: "Player ID" szöveg
     IndividualMatches.insert {
         it[IndividualMatches.matchId] = matchId
         it[homePlayerName] = "User ${hPlayerUserId.value}"
         it[guestPlayerName] = "User ${gPlayerUserId.value}"
-        it[homeScore] = homeSets // Itt a szett arányt mentjük pontnak
+        it[homeScore] = homeSets
         it[guestScore] = guestSets
         it[homeSetsWon] = homeSets
         it[guestSetsWon] = guestSets
@@ -238,47 +233,35 @@ fun seedDatabaseIfNeeded() {
     )
 
     pairings.forEach { (hId, gId, round) ->
-        // 1. Meccs létrehozása (időponttal)
         val mId = Matches.insertAndGetId {
             it[seasonId] = activeSeasonId; it[roundNumber] = round; it[homeTeamId] = hId; it[guestTeamId] = gId
-            it[status] = "finished"; it[matchDate] = LocalDate.now().atStartOfDay().plusDays(round.toLong() * 7)
-            it[matchDate] = LocalDate.now().plusDays(round.toLong() * 7).atTime(18, 30)
+            it[status] = "finished"; it[matchDate] = LocalDate.now().plusDays(round.toLong() * 7).atTime(18, 30)
             it[location] = "Budapest, Mérnök u. 35, 1119"
         }
 
-        // 2. Hazai csapat játékosainak lekérése és hozzáadása résztvevőként
         val homePlayers = (TeamMembers innerJoin Users)
             .select { TeamMembers.teamId eq hId }
             .map { "${it[Users.lastName]} ${it[Users.firstName]}" }
 
         homePlayers.forEach { pName ->
             MatchParticipants.insert {
-                it[matchId] = mId
-                it[playerName] = pName
-                it[teamSide] = "HOME"
-                it[status] = "SELECTED" // Vagy "APPLIED", ha még csak jelentkezett
+                it[matchId] = mId; it[playerName] = pName; it[teamSide] = "HOME"; it[status] = "SELECTED"
             }
         }
 
-        // 3. Vendég csapat játékosainak lekérése és hozzáadása résztvevőként
         val guestPlayers = (TeamMembers innerJoin Users)
             .select { TeamMembers.teamId eq gId }
             .map { "${it[Users.lastName]} ${it[Users.firstName]}" }
 
         guestPlayers.forEach { pName ->
             MatchParticipants.insert {
-                it[matchId] = mId
-                it[playerName] = pName
-                it[teamSide] = "GUEST"
-                it[status] = "SELECTED"
+                it[matchId] = mId; it[playerName] = pName; it[teamSide] = "GUEST"; it[status] = "SELECTED"
             }
         }
 
-        val hScore = (5..10).random()
-        val gScore = (5..10).random()
         Matches.update({ Matches.id eq mId }) {
-            it[homeTeamScore] = hScore
-            it[guestTeamScore] = gScore
+            it[homeTeamScore] = (5..10).random()
+            it[guestTeamScore] = (5..10).random()
         }
     }
     appLog.info("✅ Adatbázis feltöltve!")
@@ -302,15 +285,10 @@ fun sendFcmNotification(token: String, title: String, body: String) {
             val message = Message.builder()
                 .setToken(token)
                 .setNotification(
-                    Notification.builder()
-                        .setTitle(title)
-                        .setBody(body)
-                        .build()
-                )
-                .build()
+                    Notification.builder().setTitle(title).setBody(body).build()
+                ).build()
 
             appLog.info("🚀 FCM üzenet küldése indult. Cím: '$title'")
-
             val response = FirebaseMessaging.getInstance().send(message)
             appLog.info("✅ FCM üzenet elküldve: $response")
         } catch (e: Exception) {
@@ -321,16 +299,13 @@ fun sendFcmNotification(token: String, title: String, body: String) {
 
 fun savePlayer(db: Database, player: NewPlayerDTO): PlayerDTO {
     appLog.info("💾 Játékos mentése adatbázisba: ${player.name}")
-
     val id = transaction(db) {
         Players.insertAndGetId {
-            it[name] = player.name
-            it[age] = player.age
-            it[email] = player.email
+            it[name] = player.name; it[age] = player.age; it[email] = player.email
         }.value
     }
     val savedPlayer = PlayerDTO(id, player.name, player.age, player.email)
-    appLog.info("✅ Játékos sikeresen mentve. ID: $id, Email: ${player.email}")
+    appLog.info("✅ Játékos sikeresen mentve. ID: $id")
     return savedPlayer
 }
 
@@ -341,18 +316,11 @@ fun main() {
     val db = initDatabase(ds)
     val port = System.getenv("PORT")?.toIntOrNull() ?: 8080
 
-    // HOST = 0.0.0.0 kötelező Renderhez!
     embeddedServer(Netty, port = port, host = "0.0.0.0") {
-
-        // A háttérben töltünk, hogy a szerver azonnal indulhasson (No open ports hiba ellen)
         launch(Dispatchers.IO) {
-            try {
-                transaction(db) { seedDatabaseIfNeeded() }
-            } catch (e: Exception) {
-                appLog.error("Hiba a seedelésnél: ${e.message}")
-            }
+            try { transaction(db) { seedDatabaseIfNeeded() } }
+            catch (e: Exception) { appLog.error("Hiba a seedelésnél: ${e.message}") }
         }
-
         module(db)
     }.start(wait = true)
 }
@@ -376,23 +344,21 @@ fun Application.module(db: Database) {
     }
 
     install(ContentNegotiation) { json() }
+
     install(Authentication) {
         bearer("firebase-auth") {
             authenticate { tokenCredential ->
                 try {
-                    // A Firebase SDK leellenőrzi a tokent (lejárt-e, hamisították-e)
                     val decodedToken = FirebaseAdminAuth.getInstance().verifyIdToken(tokenCredential.token)
-
-                    // Ha sikeres, visszaadjuk a felhasználó azonosítóját a Ktornak
                     UserIdPrincipal(decodedToken.uid)
                 } catch (e: Exception) {
-                    // Ha a token érvénytelen, 401 Unauthorized hibát kap a kliens
                     appLog.warn("Érvénytelen token: ${e.message}")
                     null
                 }
             }
         }
     }
+
     install(WebSockets) {
         pingPeriod = Duration.ofSeconds(10)
         timeout = Duration.ofSeconds(60)
@@ -402,202 +368,13 @@ fun Application.module(db: Database) {
     val json = Json { classDiscriminator = "type"; encodeDefaults = true }
 
     routing {
-        // --- REGISZTRÁCIÓ SZINKRONIZÁLÁSA (Ide jön a Firebase token alapján a user) ---
-        authenticate("firebase-auth") {
-            post("/auth/sync") {
-                // Ezt az azonosítót a tokenből olvassuk ki, így NEM LEHET MEGHAMISÍTANI
-                val principal = call.principal<UserIdPrincipal>()
-                val firebaseUid = principal?.name ?: return@post call.respond(HttpStatusCode.Unauthorized)
 
-                // Várjuk az Androidtól a regisztrált adatokat (pl. név)
-                val newUserData = call.receive<UserDTO>()
+        // ====================================================================
+        // NYILVÁNOS VÉGPONTOK (Nem kell token)
+        // ====================================================================
 
-                val savedUser = transaction(db) {
-                    // Megnézzük, létezik-e már (ha csak bejelentkezett, nem kell újra beszúrni)
-                    val existingUser = Users.select { Users.firebaseUid eq firebaseUid }.singleOrNull()
-
-                    if (existingUser == null) {
-                        // Ha új user, beszúrjuk az adatbázisba
-                        val id = Users.insertAndGetId {
-                            it[Users.firebaseUid] = firebaseUid
-                            it[email] = newUserData.email
-                            it[firstName] = newUserData.firstName
-                            it[lastName] = newUserData.lastName
-                        }.value
-
-                        UserDTO(id, newUserData.email, newUserData.firstName, newUserData.lastName)
-                    } else {
-                        // Ha már létezik, visszaadjuk a meglévőt
-                        UserDTO(
-                            existingUser[Users.id].value,
-                            existingUser[Users.email],
-                            existingUser[Users.firstName],
-                            existingUser[Users.lastName]
-                        )
-                    }
-                }
-
-                call.respond(HttpStatusCode.OK, savedUser)
-            }
-
-            put("/auth/me") {
-                // Biztonság: Csak a saját magát szerkesztheti a token alapján!
-                val principal = call.principal<UserIdPrincipal>()
-                val firebaseUid = principal?.name ?: return@put call.respond(HttpStatusCode.Unauthorized)
-
-                val updatedData = call.receive<UserDTO>()
-
-                val updatedUser = transaction(db) {
-                    // Frissítjük a kereszt- és vezetéknevet
-                    val rowsAffected = Users.update({ Users.firebaseUid eq firebaseUid }) {
-                        it[firstName] = updatedData.firstName
-                        it[lastName] = updatedData.lastName
-                        // Az emailt itt szándékosan nem frissítjük, azt a Firebase kezeli!
-                    }
-
-                    // Ha sikeres volt a frissítés, lekérjük a friss adatokat
-                    if (rowsAffected > 0) {
-                        val row = Users.select { Users.firebaseUid eq firebaseUid }.single()
-                        UserDTO(
-                            id = row[Users.id].value,
-                            email = row[Users.email],
-                            firstName = row[Users.firstName],
-                            lastName = row[Users.lastName]
-                        )
-                    } else {
-                        null
-                    }
-                }
-
-                if (updatedUser != null) {
-                    call.respond(HttpStatusCode.OK, updatedUser)
-                } else {
-                    call.respond(HttpStatusCode.NotFound, "Felhasználó nem található")
-                }
-            }
-        }
-
-        // ---------------- FCM üzenet küldés ----------------
-        post("/send_fcm_notification") {
-            val request = call.receive<SendNotificationRequest>()
-
-            appLog.info("📩 FCM küldési kérés érkezett. Cél: ${request.targetEmail}")
-
-            val targetToken = transaction(db) {
-                FcmTokens.select { FcmTokens.email eq request.targetEmail }
-                    .singleOrNull()?.get(FcmTokens.token)
-            }
-
-            if (targetToken == null) {
-                appLog.warn("🛑 Hiba: FCM token nem található ehhez az e-mailhez: ${request.targetEmail}")
-                call.respond(HttpStatusCode.NotFound, "Nincs token ehhez az e-mailhez: ${request.targetEmail}")
-                return@post
-            }
-
-            sendFcmNotification(targetToken, request.title, request.body)
-            call.respond(HttpStatusCode.OK, mapOf("status" to "sent"))
-        }
-
-        // ---------------- FCM token regisztrálás ----------------
-        post("/register_fcm_token") {
-            val registration = call.receive<FcmTokenRegistration>()
-            transaction(db) {
-                FcmTokens.replace {
-                    it[email] = registration.email
-                    it[token] = registration.token
-                }
-            }
-            appLog.info("✅ FCM token regisztrálva/frissítve: Email=${registration.email}") // Logolás hozzáadva
-            call.respond(HttpStatusCode.OK, mapOf("status" to "ok"))
-        }
-
-        // ---------------- Játékos CRUD ----------------
-        // --- DEMO ---
-        get("/players") {
-            val players = transaction(db) {
-                Players.selectAll().map {
-                    PlayerDTO(
-                        it[Players.id].value,
-                        it[Players.name],
-                        it[Players.age],
-                        it[Players.email]
-                    )
-                }
-            }
-            appLog.info("📥 GET /players lekérdezés: ${players.size} játékos visszaadva.")
-            call.respond(players)
-        }
-
-        post("/players") {
-            val player = call.receive<NewPlayerDTO>()
-            val saved = savePlayer(db, player)
-
-            val event = WsEvent.PlayerAdded(saved)
-            val message = json.encodeToString(WsEvent.serializer(), event)
-            clients.forEach { it.send(message) }
-
-            appLog.info("📣 WS: PlayerAdded broadcastolva ${clients.size} kliensnek. Player ID: ${saved.id}")
-            clients.forEach {
-                it.send(message)
-            }
-
-            call.respond(HttpStatusCode.Created, saved)
-        }
-
-        put("/players/{id}") {
-            val id = call.parameters["id"]?.toIntOrNull()
-                ?: return@put call.respond(HttpStatusCode.BadRequest, "Invalid ID")
-
-            appLog.info("📝 PUT /players/$id szerkesztési kérés.")
-
-            val updated = call.receive<NewPlayerDTO>()
-            val rowAffected = transaction(db) {
-                Players.update({ Players.id eq id }) {
-                    it[name] = updated.name
-                    it[age] = updated.age
-                    it[email] = updated.email
-                }
-            }
-
-            if (rowAffected == 0) {
-                appLog.warn("🛑 Hiba: Játékos nem található az ID: $id alatt.")
-                call.respond(HttpStatusCode.NotFound, "Player not found")
-                return@put
-            }
-
-            val saved = PlayerDTO(id, updated.name, updated.age, updated.email)
-            val event = WsEvent.PlayerUpdated(saved)
-            val message = json.encodeToString(WsEvent.serializer(), event)
-
-            appLog.info("📣 WS: PlayerUpdated broadcastolva ${clients.size} kliensnek. Player ID: $id")
-            clients.forEach { it.send(message) }
-
-            call.respond(saved)
-        }
-
-        delete("/players/{id}") {
-            val id = call.parameters["id"]?.toIntOrNull()
-                ?: return@delete call.respond(HttpStatusCode.BadRequest, "Invalid ID")
-
-            appLog.info("🗑️ DELETE /players/$id törlési kérés.")
-
-            transaction(db) { Players.deleteWhere { Players.id eq id } }
-
-            val event = WsEvent.PlayerDeleted(id)
-            val message = json.encodeToString(WsEvent.serializer(), event)
-
-            appLog.info("📣 WS: PlayerDeleted broadcastolva ${clients.size} kliensnek. Player ID: $id")
-            clients.forEach { it.send(message) }
-
-            call.respond(HttpStatusCode.OK)
-        }
-
-        // --- APP ---
-
-        // Ktor Backend - Application.kt vagy Routing.kt
         get("/teams") {
             appLog.info("📥 GET /teams lekérdezés...")
-
             try {
                 val teamsResponse = transaction(db) {
                     Teams.selectAll().map { teamRow ->
@@ -606,16 +383,13 @@ fun Application.module(db: Database) {
                         val clubRow = Clubs.select { Clubs.id eq teamRow[Teams.clubId] }.single()
 
                         val teamMatches = Matches.select {
-                        ((Matches.homeTeamId eq currentTeamEntityId) or (Matches.guestTeamId eq currentTeamEntityId)) and
-                                (Matches.status eq "finished")
+                            ((Matches.homeTeamId eq currentTeamEntityId) or (Matches.guestTeamId eq currentTeamEntityId)) and
+                                    (Matches.status eq "finished")
                         }.toList()
 
-                        var wins = 0
-                        var losses = 0
-                        var draws = 0
+                        var wins = 0; var losses = 0; var draws = 0
 
                         teamMatches.forEach { row ->
-                            // Itt is EntityID-t hasonlítunk EntityID-hoz
                             val isHome = row[Matches.homeTeamId] == currentTeamEntityId
                             val homeScore = row[Matches.homeTeamScore]
                             val guestScore = row[Matches.guestTeamScore]
@@ -628,8 +402,7 @@ fun Application.module(db: Database) {
                             }
                         }
 
-                        val points = (wins * 2) + (draws * 1) // 3 pont a győzelemért, 1 a döntetlenért
-                        // -----------------------------------------------------------
+                        val points = (wins * 2) + (draws * 1)
 
                         val membersList = (TeamMembers innerJoin Users)
                             .select { TeamMembers.teamId eq tId }
@@ -642,23 +415,14 @@ fun Application.module(db: Database) {
                                 )
                             }
 
-                        // Visszaadjuk az ÚJ, bővített DTO-t (Itt is frissíteni kell a DTOs.kt-ben!)
                         TeamWithMembersDTO(
-                            teamId = tId,
-                            teamName = teamRow[Teams.name],
-                            clubName = clubRow[Clubs.name],
-                            division = teamRow[Teams.division],
-                            members = membersList,
-                            matchesPlayed = teamMatches.size,
-                            wins = wins,
-                            losses = losses,
-                            draws = draws,
-                            points = points
+                            teamId = tId, teamName = teamRow[Teams.name], clubName = clubRow[Clubs.name],
+                            division = teamRow[Teams.division], members = membersList,
+                            matchesPlayed = teamMatches.size, wins = wins, losses = losses, draws = draws, points = points
                         )
                     }
                 }
                 call.respond(teamsResponse)
-
             } catch (e: Exception) {
                 appLog.error("Hiba a /teams lekérdezésekor: ${e.message}", e)
                 call.respond(HttpStatusCode.InternalServerError, "Adatbázis hiba történt")
@@ -667,23 +431,17 @@ fun Application.module(db: Database) {
 
         get("/matches") {
             val round = call.request.queryParameters["round"]?.toIntOrNull()
-
             val matches = transaction(db) {
-                val query = if (round != null) {
-                    Matches.select { Matches.roundNumber eq round }
-                } else {
-                    Matches.selectAll()
-                }
+                val query = if (round != null) Matches.select { Matches.roundNumber eq round } else Matches.selectAll()
 
                 query.map { matchRow ->
                     val mId = matchRow[Matches.id].value
 
-                    // Csapatnevek lekérése az ID-k alapján
-                    val homeName = Teams.select { Teams.id eq matchRow[Matches.homeTeamId] }.single()[Teams.name]
-                    val guestName = Teams.select { Teams.id eq matchRow[Matches.guestTeamId] }.single()[Teams.name]
+                    val homeTeamEntityId = matchRow[Matches.homeTeamId]
+                    val guestTeamEntityId = matchRow[Matches.guestTeamId]
+                    val homeName = Teams.select { Teams.id eq homeTeamEntityId }.single()[Teams.name]
+                    val guestName = Teams.select { Teams.id eq guestTeamEntityId }.single()[Teams.name]
 
-                    // --- 2. EGYÉNI MECCSEK LEKÉRÉSE (individualMatches) ---
-                    // Csak akkor van értelme, ha finished
                     val individualMatches = IndividualMatches.select { IndividualMatches.matchId eq mId }.map { imRow ->
                         IndividualMatchDTO(
                             id = imRow[IndividualMatches.id].value,
@@ -694,7 +452,6 @@ fun Application.module(db: Database) {
                         )
                     }
 
-                    // --- 3. RÉSZTVEVŐK LEKÉRÉSE (participants) ---
                     val participants = MatchParticipants.select { MatchParticipants.matchId eq mId }.map { mpRow ->
                         MatchParticipantDTO(
                             id = mpRow[MatchParticipants.id].value,
@@ -714,6 +471,9 @@ fun Application.module(db: Database) {
                         date = matchRow[Matches.matchDate]?.toString() ?: "",
                         status = matchRow[Matches.status],
                         location = matchRow[Matches.location] ?: "",
+                        // --- HOZZÁADVA AZ ID-K ---
+                        homeTeamId = homeTeamEntityId.value,
+                        guestTeamId = guestTeamEntityId.value,
                         individualMatches = individualMatches,
                         participants = participants
                     )
@@ -722,177 +482,293 @@ fun Application.module(db: Database) {
             call.respond(matches)
         }
 
-        // --- 1. CSAPAT NEVÉNEK MÓDOSÍTÁSA (PUT) ---
-        put("/teams/{id}") {
-            val teamId = call.parameters["id"]?.toIntOrNull()
-                ?: return@put call.respond(HttpStatusCode.BadRequest, "Érvénytelen csapat ID")
-
-            val updateData = call.receive<TeamUpdateDTO>()
-
-            val rowsAffected = transaction(db) {
-                Teams.update({ Teams.id eq teamId }) {
-                    it[name] = updateData.name
-                }
+        post("/send_fcm_notification") {
+            val request = call.receive<SendNotificationRequest>()
+            val targetToken = transaction(db) {
+                FcmTokens.select { FcmTokens.email eq request.targetEmail }.singleOrNull()?.get(FcmTokens.token)
             }
-
-            if (rowsAffected > 0) {
-                call.respond(HttpStatusCode.OK, mapOf("status" to "updated", "newName" to updateData.name))
-            } else {
-                call.respond(HttpStatusCode.NotFound, "Csapat nem található")
+            if (targetToken == null) {
+                call.respond(HttpStatusCode.NotFound, "Nincs token ehhez az e-mailhez: ${request.targetEmail}")
+                return@post
             }
+            sendFcmNotification(targetToken, request.title, request.body)
+            call.respond(HttpStatusCode.OK, mapOf("status" to "sent"))
         }
 
-        // --- 2. SZABAD JÁTÉKOSOK LEKÉRÉSE (GET) ---
-        // Azok a userek kellenek, akiknek az ID-ja NINCS benne a team_members táblában
-        get("/users/available") {
-            val availableUsers = transaction(db) {
-                // Készítünk egy lekérdezést, ami visszaadja az összes olyan user ID-t, aki már csapatban van
-                val usersInTeams = TeamMembers.slice(TeamMembers.userId).selectAll()
+        post("/register_fcm_token") {
+            val registration = call.receive<FcmTokenRegistration>()
+            transaction(db) {
+                FcmTokens.replace {
+                    it[email] = registration.email
+                    it[token] = registration.token
+                }
+            }
+            call.respond(HttpStatusCode.OK, mapOf("status" to "ok"))
+        }
 
-                // Csak azokat a usereket kérjük le, akik nincsenek benne a fenti listában
-                Users.select { Users.id notInSubQuery usersInTeams }
-                    .map { row ->
-                        MemberDTO(
-                            userId = row[Users.id].value,
-                            firebaseUid = row[Users.firebaseUid],
-                            name = "${row[Users.lastName]} ${row[Users.firstName]}",
-                            isCaptain = false
+        get("/players") {
+            val players = transaction(db) {
+                Players.selectAll().map { PlayerDTO(it[Players.id].value, it[Players.name], it[Players.age], it[Players.email]) }
+            }
+            call.respond(players)
+        }
+
+        post("/players") {
+            val player = call.receive<NewPlayerDTO>()
+            val saved = savePlayer(db, player)
+            val message = json.encodeToString(WsEvent.serializer(), WsEvent.PlayerAdded(saved))
+            clients.forEach { it.send(message) }
+            call.respond(HttpStatusCode.Created, saved)
+        }
+
+        put("/players/{id}") {
+            val id = call.parameters["id"]?.toIntOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest, "Invalid ID")
+            val updated = call.receive<NewPlayerDTO>()
+            val rowAffected = transaction(db) {
+                Players.update({ Players.id eq id }) { it[name] = updated.name; it[age] = updated.age; it[email] = updated.email }
+            }
+            if (rowAffected == 0) return@put call.respond(HttpStatusCode.NotFound, "Player not found")
+            val saved = PlayerDTO(id, updated.name, updated.age, updated.email)
+            val message = json.encodeToString(WsEvent.serializer(), WsEvent.PlayerUpdated(saved))
+            clients.forEach { it.send(message) }
+            call.respond(saved)
+        }
+
+        delete("/players/{id}") {
+            val id = call.parameters["id"]?.toIntOrNull() ?: return@delete call.respond(HttpStatusCode.BadRequest, "Invalid ID")
+            transaction(db) { Players.deleteWhere { Players.id eq id } }
+            val message = json.encodeToString(WsEvent.serializer(), WsEvent.PlayerDeleted(id))
+            clients.forEach { it.send(message) }
+            call.respond(HttpStatusCode.OK)
+        }
+
+
+        // ====================================================================
+        // VÉDETT VÉGPONTOK (Csak Firebase tokennel)
+        // ====================================================================
+        authenticate("firebase-auth") {
+
+            post("/auth/sync") {
+                val principal = call.principal<UserIdPrincipal>()
+                val firebaseUid = principal?.name ?: return@post call.respond(HttpStatusCode.Unauthorized)
+                val newUserData = call.receive<UserDTO>()
+
+                val savedUser = transaction(db) {
+                    val existingUser = Users.select { Users.firebaseUid eq firebaseUid }.singleOrNull()
+                    if (existingUser == null) {
+                        val id = Users.insertAndGetId {
+                            it[Users.firebaseUid] = firebaseUid
+                            it[email] = newUserData.email
+                            it[firstName] = newUserData.firstName
+                            it[lastName] = newUserData.lastName
+                        }.value
+                        UserDTO(id, newUserData.email, newUserData.firstName, newUserData.lastName)
+                    } else {
+                        UserDTO(
+                            existingUser[Users.id].value, existingUser[Users.email],
+                            existingUser[Users.firstName], existingUser[Users.lastName]
                         )
                     }
+                }
+                call.respond(HttpStatusCode.OK, savedUser)
             }
-            call.respond(HttpStatusCode.OK, availableUsers)
-        }
 
-        // --- 3. ÚJ TAG HOZZÁADÁSA A CSAPATHOZ (POST) ---
-        post("/teams/{id}/members") {
-            val teamId = call.parameters["id"]?.toIntOrNull()
-                ?: return@post call.respond(HttpStatusCode.BadRequest, "Érvénytelen csapat ID")
+            put("/auth/me") {
+                val principal = call.principal<UserIdPrincipal>()
+                val firebaseUid = principal?.name ?: return@put call.respond(HttpStatusCode.Unauthorized)
+                val updatedData = call.receive<UserDTO>()
 
-            val request = call.receive<TeamMemberOperationDTO>()
+                val updatedUser = transaction(db) {
+                    val rowsAffected = Users.update({ Users.firebaseUid eq firebaseUid }) {
+                        it[firstName] = updatedData.firstName
+                        it[lastName] = updatedData.lastName
+                    }
+                    if (rowsAffected > 0) {
+                        val row = Users.select { Users.firebaseUid eq firebaseUid }.single()
+                        UserDTO(
+                            id = row[Users.id].value, email = row[Users.email],
+                            firstName = row[Users.firstName], lastName = row[Users.lastName]
+                        )
+                    } else null
+                }
+                if (updatedUser != null) call.respond(HttpStatusCode.OK, updatedUser) else call.respond(HttpStatusCode.NotFound, "Nincs ilyen")
+            }
 
-            transaction(db) {
-                TeamMembers.insert {
-                    it[this.teamId] = teamId
-                    it[userId] = request.userId
-                    it[isCaptain] = false // Az új tag alapból sima játékos
-                    it[joinedAt] = LocalDate.now()
+            put("/teams/{id}") {
+                val teamId = call.parameters["id"]?.toIntOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest, "Érvénytelen csapat ID")
+                val updateData = call.receive<TeamUpdateDTO>()
+                val rowsAffected = transaction(db) {
+                    Teams.update({ Teams.id eq teamId }) { it[name] = updateData.name }
+                }
+                if (rowsAffected > 0) call.respond(HttpStatusCode.OK, mapOf("status" to "updated")) else call.respond(HttpStatusCode.NotFound, "Csapat nem található")
+            }
+
+            get("/users/available") {
+                val availableUsers = transaction(db) {
+                    val usersInTeams = TeamMembers.slice(TeamMembers.userId).selectAll()
+                    Users.select { Users.id notInSubQuery usersInTeams }.map { row ->
+                        MemberDTO(
+                            userId = row[Users.id].value, firebaseUid = row[Users.firebaseUid],
+                            name = "${row[Users.lastName]} ${row[Users.firstName]}", isCaptain = false
+                        )
+                    }
+                }
+                call.respond(HttpStatusCode.OK, availableUsers)
+            }
+
+            post("/teams/{id}/members") {
+                val teamId = call.parameters["id"]?.toIntOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, "Érvénytelen csapat ID")
+                val request = call.receive<TeamMemberOperationDTO>()
+                transaction(db) {
+                    TeamMembers.insert {
+                        it[this.teamId] = teamId; it[userId] = request.userId
+                        it[isCaptain] = false; it[joinedAt] = LocalDate.now()
+                    }
+                }
+                call.respond(HttpStatusCode.Created, mapOf("status" to "added"))
+            }
+
+            delete("/teams/{teamId}/members/{userId}") {
+                val teamId = call.parameters["teamId"]?.toIntOrNull() ?: return@delete call.respond(HttpStatusCode.BadRequest, "Érvénytelen ID")
+                val userId = call.parameters["userId"]?.toIntOrNull() ?: return@delete call.respond(HttpStatusCode.BadRequest, "Érvénytelen ID")
+                val rowsDeleted = transaction(db) {
+                    TeamMembers.deleteWhere { (TeamMembers.teamId eq teamId) and (TeamMembers.userId eq userId) }
+                }
+                if (rowsDeleted > 0) call.respond(HttpStatusCode.OK, mapOf("status" to "deleted")) else call.respond(HttpStatusCode.NotFound, "Nincs ilyen")
+            }
+
+            // --- JELENTKEZÉS A MECCSRE ---
+            post("/matches/{matchId}/apply") {
+                val principal = call.principal<UserIdPrincipal>()
+                val firebaseUid = principal?.name ?: return@post call.respond(HttpStatusCode.Unauthorized)
+                val matchId = call.parameters["matchId"]?.toIntOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, "Érvénytelen meccs ID")
+
+                val result: Pair<HttpStatusCode, Any> = transaction(db) {
+                    val userRow = Users.select { Users.firebaseUid eq firebaseUid }.singleOrNull()
+                    if (userRow == null) return@transaction Pair(HttpStatusCode.NotFound, "User nem található")
+
+                    val userId = userRow[Users.id]
+                    val userName = "${userRow[Users.lastName]} ${userRow[Users.firstName]}"
+
+                    val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull()
+                    if (matchRow == null) return@transaction Pair(HttpStatusCode.NotFound, "Meccs nem található")
+
+                    val isHomeTeamMember = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.homeTeamId]) and (TeamMembers.userId eq userId) }.count() > 0
+                    val isGuestTeamMember = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.guestTeamId]) and (TeamMembers.userId eq userId) }.count() > 0
+
+                    val teamSide = when {
+                        isHomeTeamMember -> "HOME"
+                        isGuestTeamMember -> "GUEST"
+                        else -> return@transaction Pair(HttpStatusCode.Forbidden, "Nem vagy tagja egyik csapatnak sem!")
+                    }
+
+                    val alreadyApplied = MatchParticipants.select { (MatchParticipants.matchId eq matchId) and (MatchParticipants.playerName eq userName) }.count() > 0
+                    if (alreadyApplied) return@transaction Pair(HttpStatusCode.Conflict, "Már jelentkeztél erre a meccsre!")
+
+                    MatchParticipants.insert {
+                        it[MatchParticipants.matchId] = matchId
+                        it[MatchParticipants.playerName] = userName
+                        it[MatchParticipants.teamSide] = teamSide
+                        it[MatchParticipants.status] = "APPLIED"
+                    }
+                    Pair(HttpStatusCode.OK, mapOf("status" to "applied"))
+                }
+                call.respond(result.first, result.second)
+            }
+
+            // --- JELENTKEZÉS VISSZAVONÁSA ---
+            delete("/matches/{matchId}/apply") {
+                val principal = call.principal<UserIdPrincipal>()
+                val firebaseUid = principal?.name ?: return@delete call.respond(HttpStatusCode.Unauthorized)
+                val matchId = call.parameters["matchId"]?.toIntOrNull() ?: return@delete call.respond(HttpStatusCode.BadRequest, "Érvénytelen meccs ID")
+
+                val result: Pair<HttpStatusCode, Any> = transaction(db) {
+                    val userRow = Users.select { Users.firebaseUid eq firebaseUid }.singleOrNull()
+                    if (userRow == null) return@transaction Pair(HttpStatusCode.NotFound, "User nem található")
+                    val userName = "${userRow[Users.lastName]} ${userRow[Users.firstName]}"
+
+                    val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull()
+                    if (matchRow == null) return@transaction Pair(HttpStatusCode.NotFound, "Meccs nem található")
+
+                    if (matchRow[Matches.status] != "scheduled") {
+                        return@transaction Pair(HttpStatusCode.Forbidden, "A meccs már elindult vagy lezárult, nem vonhatod vissza a jelentkezést.")
+                    }
+
+                    val deletedRows = MatchParticipants.deleteWhere {
+                        (MatchParticipants.matchId eq matchId) and (MatchParticipants.playerName eq userName)
+                    }
+
+                    if (deletedRows > 0) Pair(HttpStatusCode.OK, mapOf("status" to "withdrawn"))
+                    else Pair(HttpStatusCode.NotFound, "Nem találtunk aktív jelentkezést.")
+                }
+                call.respond(result.first, result.second)
+            }
+
+            // --- KAPITÁNYI VÉGLEGESÍTÉS / INDÍTÁS ---
+            post("/matches/{matchId}/finalize") {
+                val principal = call.principal<UserIdPrincipal>()
+                val firebaseUid = principal?.name ?: return@post call.respond(HttpStatusCode.Unauthorized)
+                val matchId = call.parameters["matchId"]?.toIntOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, "Érvénytelen meccs ID")
+
+                val result: Pair<HttpStatusCode, Any> = transaction(db) {
+                    val userRow = Users.select { Users.firebaseUid eq firebaseUid }.singleOrNull()
+                    if (userRow == null) return@transaction Pair(HttpStatusCode.NotFound, "User nem található")
+                    val userId = userRow[Users.id]
+
+                    val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull()
+                    if (matchRow == null) return@transaction Pair(HttpStatusCode.NotFound, "Meccs nem található")
+
+                    val isHomeCap = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.homeTeamId]) and (TeamMembers.userId eq userId) and (TeamMembers.isCaptain eq true) }.count() > 0
+                    val isGuestCap = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.guestTeamId]) and (TeamMembers.userId eq userId) and (TeamMembers.isCaptain eq true) }.count() > 0
+
+                    if (!isHomeCap && !isGuestCap) return@transaction Pair(HttpStatusCode.Forbidden, "Csak a csapatkapitány véglegesítheti a keretet!")
+
+                    val teamSide = if (isHomeCap) "HOME" else "GUEST"
+
+                    val selectedCount = MatchParticipants.select {
+                        (MatchParticipants.matchId eq matchId) and (MatchParticipants.teamSide eq teamSide) and (MatchParticipants.status eq "SELECTED")
+                    }.count()
+
+                    if (selectedCount < 4) return@transaction Pair(HttpStatusCode.BadRequest, "Legalább 4 kiválasztott játékos kell az indításhoz!")
+
+                    Matches.update({ Matches.id eq matchId }) {
+                        it[status] = "in_progress"
+                    }
+
+                    Pair(HttpStatusCode.OK, mapOf("status" to "finalized", "message" to "Meccs sikeresen elindítva!"))
+                }
+                call.respond(result.first, result.second)
+            }
+
+            // --- STÁTUSZ FRISSÍTÉSE (Betesz / Kivesz) ---
+            put("/matches/participants/{participantId}/status") {
+                val principal = call.principal<UserIdPrincipal>()
+                val firebaseUid = principal?.name ?: return@put call.respond(HttpStatusCode.Unauthorized)
+                val participantId = call.parameters["participantId"]?.toIntOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest, "Érvénytelen jelentkezési ID")
+
+                val request = call.receive<ParticipantStatusUpdateDTO>()
+
+                val rowsUpdated = transaction(db) {
+                    MatchParticipants.update({ MatchParticipants.id eq participantId }) {
+                        it[status] = request.status
+                    }
+                }
+
+                if (rowsUpdated > 0) {
+                    call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
+                } else {
+                    call.respond(HttpStatusCode.NotFound, "Jelentkezési adat nem található")
                 }
             }
-            call.respond(HttpStatusCode.Created, mapOf("status" to "added"))
-        }
 
-        // --- 4. TAG ELTÁVOLÍTÁSA A CSAPATBÓL (DELETE) ---
-        delete("/teams/{teamId}/members/{userId}") {
-            val teamId = call.parameters["teamId"]?.toIntOrNull()
-                ?: return@delete call.respond(HttpStatusCode.BadRequest, "Érvénytelen csapat ID")
-            val userId = call.parameters["userId"]?.toIntOrNull()
-                ?: return@delete call.respond(HttpStatusCode.BadRequest, "Érvénytelen user ID")
-
-            val rowsDeleted = transaction(db) {
-                TeamMembers.deleteWhere {
-                    (TeamMembers.teamId eq teamId) and (TeamMembers.userId eq userId)
-                }
-            }
-
-            if (rowsDeleted > 0) {
-                call.respond(HttpStatusCode.OK, mapOf("status" to "deleted"))
-            } else {
-                call.respond(HttpStatusCode.NotFound, "A játékos nem található ebben a csapatban")
-            }
-        }
-
-        post("matches/{matchId}/apply") {
-            val principal = call.principal<UserIdPrincipal>()
-            val firebaseUid = principal?.name ?: return@post call.respond(HttpStatusCode.Unauthorized)
-
-            val matchId = call.parameters["matchId"]?.toIntOrNull()
-                ?: return@post call.respond(HttpStatusCode.BadRequest, "Érvénytelen meccs ID")
-
-            // Létrehozunk egy párost a válasz kódjához és az üzenethez
-            val result: Pair<HttpStatusCode, Any> = transaction(db) {
-                // 1. Megkeressük a usert
-                val userRow = Users.select { Users.firebaseUid eq firebaseUid }.singleOrNull()
-                if (userRow == null) return@transaction Pair(HttpStatusCode.NotFound, "User nem található")
-
-                val userId = userRow[Users.id]
-                val userName = "${userRow[Users.lastName]} ${userRow[Users.firstName]}"
-
-                // 2. Megkeressük a meccset
-                val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull()
-                if (matchRow == null) return@transaction Pair(HttpStatusCode.NotFound, "Meccs nem található")
-
-                // 3. Megnézzük, hogy a user a hazai vagy a vendég csapat tagja-e
-                val isHomeTeamMember = TeamMembers.select {
-                    (TeamMembers.teamId eq matchRow[Matches.homeTeamId]) and (TeamMembers.userId eq userId)
-                }.count() > 0
-
-                val isGuestTeamMember = TeamMembers.select {
-                    (TeamMembers.teamId eq matchRow[Matches.guestTeamId]) and (TeamMembers.userId eq userId)
-                }.count() > 0
-
-                val teamSide = when {
-                    isHomeTeamMember -> "HOME"
-                    isGuestTeamMember -> "GUEST"
-                    else -> return@transaction Pair(HttpStatusCode.Forbidden, "Nem vagy tagja egyik csapatnak sem!")
-                }
-
-                // 4. Ellenőrizzük, hogy nem jelentkezett-e már
-                val alreadyApplied = MatchParticipants.select {
-                    (MatchParticipants.matchId eq matchId) and (MatchParticipants.playerName eq userName)
-                }.count() > 0
-
-                if (alreadyApplied) {
-                    return@transaction Pair(HttpStatusCode.Conflict, "Már jelentkeztél erre a meccsre!")
-                }
-
-                // 5. Beszúrás
-                MatchParticipants.insert {
-                    it[MatchParticipants.matchId] = matchId
-                    it[MatchParticipants.playerName] = userName
-                    it[MatchParticipants.teamSide] = teamSide
-                    it[MatchParticipants.status] = "APPLIED"
-                }
-
-                // Sikeres lefutás
-                Pair(HttpStatusCode.OK, mapOf("status" to "applied"))
-            }
-
-            // A transaction blokk véget ért, itt már biztonságosan hívható a suspend function
-            call.respond(result.first, result.second)
-        }
-
-        put("/matches/participants/{participantId}/status") {
-            val principal = call.principal<UserIdPrincipal>()
-            val firebaseUid = principal?.name ?: return@put call.respond(HttpStatusCode.Unauthorized)
-
-            val participantId = call.parameters["participantId"]?.toIntOrNull()
-                ?: return@put call.respond(HttpStatusCode.BadRequest, "Érvénytelen jelentkezési ID")
-
-            val request = call.receive<ParticipantStatusUpdateDTO>()
-
-            // A transaction visszadja a módosított sorok számát
-            val rowsUpdated = transaction(db) {
-                MatchParticipants.update({ MatchParticipants.id eq participantId }) {
-                    it[status] = request.status
-                }
-            }
-
-            // A kiértékelést és a választ a blokkon kívül végezzük
-            if (rowsUpdated > 0) {
-                // TODO SIKER! Később ide tesszük be a Push Notification küldést!
-                call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
-            } else {
-                call.respond(HttpStatusCode.NotFound, "Jelentkezési adat nem található")
-            }
         }
 
         // ---------------- WebSocket ----------------
         webSocket("/ws/players") {
             appLog.info("🔗 Új WebSocket kliens csatlakozott. Jelenlegi kliensek száma: ${clients.size + 1}")
             clients.add(this)
-            try {
-                incoming.consumeEach { }
-            } finally {
+            try { incoming.consumeEach { } }
+            finally {
                 clients.remove(this)
                 appLog.info("💔 WebSocket kliens lekapcsolódott. Jelenlegi kliensek száma: ${clients.size}")
             }

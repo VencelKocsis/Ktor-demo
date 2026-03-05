@@ -73,6 +73,8 @@ data class MatchDTO(
     val date: String,
     val status: String,
     val location: String,
+    val homeTeamId: Int,
+    val guestTeamId: Int,
     val individualMatches: List<IndividualMatchDTO>? = null,
     val participants: List<MatchParticipantDTO>? = null
 )
