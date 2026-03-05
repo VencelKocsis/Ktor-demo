@@ -717,76 +717,69 @@ fun Application.module(db: Database) {
             post("/matches/{matchId}/finalize") {
                 val principal = call.principal<UserIdPrincipal>()
                 val firebaseUid = principal?.name ?: return@post call.respond(HttpStatusCode.Unauthorized)
-                val matchId = call.parameters["matchId"]?.toIntOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, "Érvénytelen meccs ID")
+                val matchId = call.parameters["matchId"]?.toIntOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, "Invalid Match ID")
 
-                val result: Pair<HttpStatusCode, Any> = transaction(db) {
+                // 1. ADATGYŰJTÉS (Rövid tranzakció)
+                val notificationTask = transaction(db) {
                     val userRow = Users.select { Users.firebaseUid eq firebaseUid }.singleOrNull()
-                    if (userRow == null) return@transaction Pair(HttpStatusCode.NotFound, "User nem található")
+                        ?: return@transaction null
                     val userId = userRow[Users.id]
 
                     val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull()
-                    if (matchRow == null) return@transaction Pair(HttpStatusCode.NotFound, "Meccs nem található")
+                        ?: return@transaction null
 
+                    // Kapitány ellenőrzése
                     val isHomeCap = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.homeTeamId]) and (TeamMembers.userId eq userId) and (TeamMembers.isCaptain eq true) }.count() > 0
                     val isGuestCap = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.guestTeamId]) and (TeamMembers.userId eq userId) and (TeamMembers.isCaptain eq true) }.count() > 0
 
-                    if (!isHomeCap && !isGuestCap) return@transaction Pair(HttpStatusCode.Forbidden, "Csak a csapatkapitány véglegesítheti a keretet!")
+                    if (!isHomeCap && !isGuestCap) return@transaction null // Jogosultság hiba
 
                     val teamSide = if (isHomeCap) "HOME" else "GUEST"
 
-                    val selectedCount = MatchParticipants.select {
-                        (MatchParticipants.matchId eq matchId) and (MatchParticipants.teamSide eq teamSide) and (MatchParticipants.status eq "SELECTED")
-                    }.count()
-
-                    if (selectedCount < 4) return@transaction Pair(HttpStatusCode.BadRequest, "Legalább 4 kiválasztott játékos kell az indításhoz!")
-
+                    // Meccs státusz frissítése
                     Matches.update({ Matches.id eq matchId }) {
                         it[status] = "in_progress"
                     }
 
-                    // --- ÚJ: TÖMEGES PUSH NOTIFICATION KÜLDÉSE ---
-                    // Lekérjük a véglegesített keretbe kiválasztott játékosok neveit
-                    val selectedPlayerNames = MatchParticipants.select {
-                        (MatchParticipants.matchId eq matchId) and (MatchParticipants.teamSide eq teamSide) and (MatchParticipants.status eq "SELECTED")
-                    }.map { it[MatchParticipants.playerName] }
+                    // Érintett játékosok és tokenjeik kigyűjtése
+                    val playersToNotify = (MatchParticipants innerJoin Users innerJoin FcmTokens)
+                        .slice(Users.email, FcmTokens.token)
+                        .select {
+                            (MatchParticipants.matchId eq matchId) and
+                                    (MatchParticipants.teamSide eq teamSide) and
+                                    (MatchParticipants.status eq "SELECTED") and
+                                    (Users.firebaseUid neq firebaseUid) // Kapitány kizárva
+                        }
+                        .map { row ->
+                            Pair(row[Users.email], row[FcmTokens.token])
+                        }
 
-                    val homeTeamName = Teams.select { Teams.id eq matchRow[Matches.homeTeamId] }.single()[Teams.name]
-                    val guestTeamName = Teams.select { Teams.id eq matchRow[Matches.guestTeamId] }.single()[Teams.name]
-                    val matchTitle = "$homeTeamName vs $guestTeamName"
+                    val matchTitle = "${Teams.select { Teams.id eq matchRow[Matches.homeTeamId] }.single()[Teams.name]} vs ${Teams.select { Teams.id eq matchRow[Matches.guestTeamId] }.single()[Teams.name]}"
 
-                    // A háttérben megkeressük az FCM tokenjeiket, és kilőjük az üzenetet
+                    // Visszaadjuk a listát és az adatokat a tranzakción kívülre
+                    Pair(playersToNotify, matchTitle)
+                }
+
+                // 2. VÁLASZADÁS AZONNAL
+                if (notificationTask == null) {
+                    call.respond(HttpStatusCode.Forbidden, "Hiba az indításkor: nincs jogosultság vagy nem található a meccs.")
+                } else {
+                    call.respond(HttpStatusCode.OK, mapOf("status" to "finalized"))
+
+                    // 3. ÉRTESÍTÉSEK KÜLDÉSE A HÁTTÉRBEN (Már tranzakción kívül!)
                     applicationScope.launch {
-                        transaction(db) {
-                            selectedPlayerNames.forEach { pName ->
-                                val targetUser = Users.selectAll().firstOrNull {
-                                    "${it[Users.lastName]} ${it[Users.firstName]}" == pName
-                                }
-
-                                // ÚJ FELTÉTEL: targetUser[Users.firebaseUid] != firebaseUid
-                                // Így az a személy, aki a gombot megnyomta (a kapitány), NEM kap értesítést!
-                                if (targetUser != null && targetUser[Users.firebaseUid] != firebaseUid) {
-
-                                    val targetEmail = targetUser[Users.email]
-                                    val token = FcmTokens.select { FcmTokens.email eq targetEmail }.singleOrNull()?.get(FcmTokens.token)
-
-                                    if (token != null) {
-                                        sendFcmNotification(
-                                            db = db,
-                                            email = targetEmail,
-                                            token = token,
-                                            title = "A mérkőzés elindult! 🏁",
-                                            body = "A kapitány véglegesítette a keretet a $matchTitle meccsre. Várunk a pályán!"
-                                        )
-                                    }
-                                }
-                            }
+                        val (players, title) = notificationTask
+                        players.forEach { (email, token) ->
+                            sendFcmNotification(
+                                db = db,
+                                email = email,
+                                token = token,
+                                title = "A mérkőzés elindult! 🏁",
+                                body = "A keret véglegesítve lett a $title meccsre."
+                            )
                         }
                     }
-                    // ---------------------------------------------
-
-                    Pair(HttpStatusCode.OK, mapOf("status" to "finalized", "message" to "Meccs sikeresen elindítva!"))
                 }
-                call.respond(result.first, result.second)
             }
 
             // --- STÁTUSZ FRISSÍTÉSE (Betesz / Kivesz) ---
