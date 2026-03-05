@@ -735,6 +735,39 @@ fun Application.module(db: Database) {
                         it[status] = "in_progress"
                     }
 
+                    // --- ÚJ: TÖMEGES PUSH NOTIFICATION KÜLDÉSE ---
+                    // Lekérjük a véglegesített keretbe kiválasztott játékosok neveit
+                    val selectedPlayerNames = MatchParticipants.select {
+                        (MatchParticipants.matchId eq matchId) and (MatchParticipants.teamSide eq teamSide) and (MatchParticipants.status eq "SELECTED")
+                    }.map { it[MatchParticipants.playerName] }
+
+                    val homeTeamName = Teams.select { Teams.id eq matchRow[Matches.homeTeamId] }.single()[Teams.name]
+                    val guestTeamName = Teams.select { Teams.id eq matchRow[Matches.guestTeamId] }.single()[Teams.name]
+                    val matchTitle = "$homeTeamName vs $guestTeamName"
+
+                    // A háttérben megkeressük az FCM tokenjeiket, és kilőjük az üzenetet
+                    applicationScope.launch {
+                        transaction(db) {
+                            selectedPlayerNames.forEach { pName ->
+                                val targetUser = Users.selectAll().firstOrNull {
+                                    "${it[Users.lastName]} ${it[Users.firstName]}" == pName
+                                }
+                                if (targetUser != null) {
+                                    val targetEmail = targetUser[Users.email]
+                                    val token = FcmTokens.select { FcmTokens.email eq targetEmail }.singleOrNull()?.get(FcmTokens.token)
+                                    if (token != null) {
+                                        sendFcmNotification(
+                                            token = token,
+                                            title = "A mérkőzés elindult! 🏁",
+                                            body = "A kapitány véglegesítette a keretet a $matchTitle meccsre. Várunk a pályán!"
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // ---------------------------------------------
+
                     Pair(HttpStatusCode.OK, mapOf("status" to "finalized", "message" to "Meccs sikeresen elindítva!"))
                 }
                 call.respond(result.first, result.second)
