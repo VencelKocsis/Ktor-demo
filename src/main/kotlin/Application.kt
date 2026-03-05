@@ -274,7 +274,7 @@ private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 // ---------------- Segédfüggvények ----------------
 
-fun sendFcmNotification(token: String, title: String, body: String) {
+fun sendFcmNotification(db: Database, email: String, token: String, title: String, body: String) {
     if (FirebaseApp.getApps().isEmpty()) {
         appLog.warn("Firebase nincs inicializálva, nem küldhető FCM.")
         return
@@ -288,11 +288,20 @@ fun sendFcmNotification(token: String, title: String, body: String) {
                     Notification.builder().setTitle(title).setBody(body).build()
                 ).build()
 
-            appLog.info("🚀 FCM üzenet küldése indult. Cím: '$title'")
+            appLog.info("🚀 FCM üzenet küldése indult. Cím: '$title' (Cél: $email)")
             val response = FirebaseMessaging.getInstance().send(message)
             appLog.info("✅ FCM üzenet elküldve: $response")
+
         } catch (e: Exception) {
             appLog.error("❌ FCM küldési hiba: ${e.message}")
+
+            // HA A TOKEN MÁR NEM LÉTEZIK (Törölték az appot, vagy lejárt)
+            if (e.message?.contains("Requested entity was not found") == true || e.message?.contains("UNREGISTERED") == true) {
+                appLog.info("🧹 Halott token észlelve! Törlés az adatbázisból: $email")
+                transaction(db) {
+                    FcmTokens.deleteWhere { FcmTokens.email eq email }
+                }
+            }
         }
     }
 }
@@ -491,7 +500,7 @@ fun Application.module(db: Database) {
                 call.respond(HttpStatusCode.NotFound, "Nincs token ehhez az e-mailhez: ${request.targetEmail}")
                 return@post
             }
-            sendFcmNotification(targetToken, request.title, request.body)
+            sendFcmNotification(db, request.targetEmail, targetToken, request.title, request.body)
             call.respond(HttpStatusCode.OK, mapOf("status" to "sent"))
         }
 
@@ -757,6 +766,8 @@ fun Application.module(db: Database) {
                                     val token = FcmTokens.select { FcmTokens.email eq targetEmail }.singleOrNull()?.get(FcmTokens.token)
                                     if (token != null) {
                                         sendFcmNotification(
+                                            db = db,
+                                            email = targetEmail,
                                             token = token,
                                             title = "A mérkőzés elindult! 🏁",
                                             body = "A kapitány véglegesítette a keretet a $matchTitle meccsre. Várunk a pályán!"
@@ -825,10 +836,12 @@ fun Application.module(db: Database) {
                                     }
                                 }
 
-                                notificationData?.let { (token, matchName, _) ->
+                                notificationData?.let { (token, matchName, targetEmail) ->
                                     sendFcmNotification(
+                                        db = db,
+                                        email = targetEmail, // Ezt előzőleg a Triple-ben stringként kell visszaadni!
                                         token = token,
-                                        title = "Bekerültél a keretbe! \uD83C\uDFC0",
+                                        title = "Bekerültél a keretbe! 🏀",
                                         body = "A kapitány kiválasztott a $matchName mérkőzésre!"
                                     )
                                 }
