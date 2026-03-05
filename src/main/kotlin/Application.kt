@@ -761,9 +761,14 @@ fun Application.module(db: Database) {
                                 val targetUser = Users.selectAll().firstOrNull {
                                     "${it[Users.lastName]} ${it[Users.firstName]}" == pName
                                 }
-                                if (targetUser != null) {
+
+                                // ÚJ FELTÉTEL: targetUser[Users.firebaseUid] != firebaseUid
+                                // Így az a személy, aki a gombot megnyomta (a kapitány), NEM kap értesítést!
+                                if (targetUser != null && targetUser[Users.firebaseUid] != firebaseUid) {
+
                                     val targetEmail = targetUser[Users.email]
                                     val token = FcmTokens.select { FcmTokens.email eq targetEmail }.singleOrNull()?.get(FcmTokens.token)
+
                                     if (token != null) {
                                         sendFcmNotification(
                                             db = db,
