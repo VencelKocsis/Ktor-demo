@@ -755,12 +755,62 @@ fun Application.module(db: Database) {
                 }
 
                 if (rowsUpdated > 0) {
+                    // --- ÚJ: PUSH NOTIFICATION KÜLDÉSE (Háttérszálon) ---
+                    if (request.status == "SELECTED") {
+                        applicationScope.launch {
+                            try {
+                                appLog.info("📢 Push értesítés logikája indul a participantId=$participantId számára")
+                                val notificationData = transaction(db) {
+                                    val pRow = MatchParticipants.select { MatchParticipants.id eq participantId }.single()
+                                    val pName = pRow[MatchParticipants.playerName]
+                                    val mId = pRow[MatchParticipants.matchId]
+                                    appLog.info("📢 Résztvevő neve: $pName, Meccs ID: $mId")
+
+                                    val userRow = Users.selectAll().firstOrNull {
+                                        "${it[Users.lastName]} ${it[Users.firstName]}" == pName
+                                    }
+
+                                    if (userRow != null) {
+                                        val email = userRow[Users.email]
+                                        appLog.info("📢 Felhasználó megtalálva! Email: $email")
+                                        val token = FcmTokens.select { FcmTokens.email eq email }.singleOrNull()?.get(FcmTokens.token)
+
+                                        val matchRow = Matches.select { Matches.id eq mId }.single()
+                                        val homeTeamName = Teams.select { Teams.id eq matchRow[Matches.homeTeamId] }.single()[Teams.name]
+                                        val guestTeamName = Teams.select { Teams.id eq matchRow[Matches.guestTeamId] }.single()[Teams.name]
+
+                                        if (token != null) {
+                                            appLog.info("📢 FCM Token megtalálva a $email címhez: $token")
+                                            Triple(token, "$homeTeamName vs $guestTeamName", matchRow[Matches.matchDate].toString())
+                                        } else {
+                                            appLog.warn("⚠️ Nincs FCM token regisztrálva a $email címhez!")
+                                            null
+                                        }
+                                    } else {
+                                        appLog.warn("⚠️ Nem találtunk Users rekordot a '$pName' névhez!")
+                                        null
+                                    }
+                                }
+
+                                notificationData?.let { (token, matchName, _) ->
+                                    sendFcmNotification(
+                                        token = token,
+                                        title = "Bekerültél a keretbe! \uD83C\uDFC0",
+                                        body = "A kapitány kiválasztott a $matchName mérkőzésre!"
+                                    )
+                                }
+                            } catch (e: Exception) {
+                                appLog.error("❌ Hiba az értesítés előkészítésekor: ${e.message}")
+                            }
+                        }
+                    }
+                    // ----------------------------------------------------
+
                     call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
                 } else {
                     call.respond(HttpStatusCode.NotFound, "Jelentkezési adat nem található")
                 }
             }
-
         }
 
         // ---------------- WebSocket ----------------
