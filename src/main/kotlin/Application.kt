@@ -48,10 +48,9 @@ object Players : IntIdTable("players") {
     val email = varchar("email", 150)
 }
 
-object FcmTokens : Table("fcm_tokens") {
-    val email = varchar("email", 150).uniqueIndex()
+object FcmTokens : IntIdTable("fcm_tokens") {
+    val userId = reference("user_id", Users).uniqueIndex()
     val token = text("token")
-    override val primaryKey = PrimaryKey(email)
 }
 
 object Seasons : IntIdTable("seasons") {
@@ -161,10 +160,6 @@ fun initDataSource(): HikariDataSource {
 fun initDatabase(ds: HikariDataSource): Database {
     val db = Database.connect(ds)
     transaction(db) {
-        SchemaUtils.drop(
-            Players, FcmTokens, Users, Clubs, Teams, TeamMembers, Seasons,
-            Matches, IndividualMatches, MatchParticipants
-        )
 
         SchemaUtils.createMissingTablesAndColumns(
             Players, FcmTokens, Users, Clubs, Teams, TeamMembers, Seasons,
@@ -298,9 +293,10 @@ fun sendFcmNotification(db: Database, email: String, token: String, title: Strin
             appLog.error("❌ FCM küldési hiba: ${e.message}")
 
             if (e.message?.contains("Requested entity was not found") == true || e.message?.contains("UNREGISTERED") == true) {
-                appLog.info("🧹 Halott token észlelve! Törlés az adatbázisból: $email")
+                appLog.info("🧹 Halott token észlelve! Törlés az adatbázisból...")
                 transaction(db) {
-                    FcmTokens.deleteWhere { FcmTokens.email eq email }
+                    // JAVÍTVA: A token alapján törlünk, mert a userId-t most nem tudjuk kapásból
+                    FcmTokens.deleteWhere { FcmTokens.token eq token }
                 }
             }
         }
@@ -498,26 +494,36 @@ fun Application.module(db: Database) {
 
         post("/send_fcm_notification") {
             val request = call.receive<SendNotificationRequest>()
-            val targetToken = transaction(db) {
-                FcmTokens.select { FcmTokens.email eq request.targetEmail }.singleOrNull()?.get(FcmTokens.token)
+            val notificationData = transaction(db) {
+                (Users innerJoin FcmTokens)
+                    .slice(FcmTokens.token)
+                    .select { Users.email eq request.targetEmail }
+                    .singleOrNull()?.get(FcmTokens.token)
             }
-            if (targetToken == null) {
-                call.respond(HttpStatusCode.NotFound, "Nincs token ehhez az e-mailhez: ${request.targetEmail}")
+            if (notificationData == null) {
+                call.respond(HttpStatusCode.NotFound, "Nincs token ehhez az e-mailhez.")
                 return@post
             }
-            sendFcmNotification(db, request.targetEmail, targetToken, request.title, request.body)
+            sendFcmNotification(db, request.targetEmail, notificationData, request.title, request.body)
             call.respond(HttpStatusCode.OK, mapOf("status" to "sent"))
         }
 
         post("/register_fcm_token") {
             val registration = call.receive<FcmTokenRegistration>()
-            transaction(db) {
-                FcmTokens.replace {
-                    it[email] = registration.email
-                    it[token] = registration.token
-                }
+            val result = transaction(db) {
+                val userRow = Users.select { Users.email eq registration.email }.singleOrNull()
+                if (userRow != null) {
+                    val uId = userRow[Users.id]
+                    FcmTokens.deleteWhere { FcmTokens.userId eq uId }
+                    FcmTokens.insert {
+                        it[userId] = uId
+                        it[token] = registration.token
+                    }
+                    true
+                } else false
             }
-            call.respond(HttpStatusCode.OK, mapOf("status" to "ok"))
+            if (result) call.respond(HttpStatusCode.OK, mapOf("status" to "ok"))
+            else call.respond(HttpStatusCode.NotFound, "User nem található")
         }
 
         get("/players") {
@@ -728,7 +734,6 @@ fun Application.module(db: Database) {
                     val notificationData = transaction(db) {
                         val userRow = Users.select { Users.firebaseUid eq firebaseUid }.singleOrNull() ?: return@transaction null
                         val captainUserId = userRow[Users.id]
-
                         val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull() ?: return@transaction null
 
                         val isHomeCap = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.homeTeamId]) and (TeamMembers.userId eq captainUserId) and (TeamMembers.isCaptain eq true) }.count() > 0
@@ -740,7 +745,6 @@ fun Application.module(db: Database) {
 
                         Matches.update({ Matches.id eq matchId }) { it[status] = "in_progress" }
 
-                        // TÖKÉLETES SQL JOIN AZ ID ALAPJÁN
                         val tokensWithEmails = (MatchParticipants innerJoin Users innerJoin FcmTokens)
                             .slice(Users.email, FcmTokens.token)
                             .select {
@@ -758,7 +762,7 @@ fun Application.module(db: Database) {
                     }
 
                     if (notificationData == null) {
-                        call.respond(HttpStatusCode.Forbidden, "Hiba az indításkor: nincs jogosultság vagy nem található a meccs.")
+                        call.respond(HttpStatusCode.Forbidden, "Hiba az indításkor: nincs jogosultság.")
                     } else {
                         call.respond(HttpStatusCode.OK, mapOf("status" to "finalized"))
                         applicationScope.launch {
@@ -797,9 +801,13 @@ fun Application.module(db: Database) {
                                     val mId = pRow[MatchParticipants.matchId]
                                     val uId = pRow[MatchParticipants.userId]
 
+                                    // Lekérjük a felhasználó adatait (kell az email a logoláshoz/értesítéshez)
                                     val userRow = Users.select { Users.id eq uId }.single()
                                     val email = userRow[Users.email]
-                                    val token = FcmTokens.select { FcmTokens.email eq email }.singleOrNull()?.get(FcmTokens.token)
+
+                                    // JAVÍTVA: A tokent most már a userId alapján keressük, mert a táblában nincs email oszlop!
+                                    val token = FcmTokens.select { FcmTokens.userId eq uId }
+                                        .singleOrNull()?.get(FcmTokens.token)
 
                                     val matchRow = Matches.select { Matches.id eq mId }.single()
                                     val homeTeamName = Teams.select { Teams.id eq matchRow[Matches.homeTeamId] }.single()[Teams.name]
