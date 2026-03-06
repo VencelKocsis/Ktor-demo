@@ -29,6 +29,7 @@ import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.dao.id.IntIdTable
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.javatime.date
 import org.jetbrains.exposed.sql.javatime.datetime
 import org.jetbrains.exposed.sql.transactions.transaction
@@ -98,17 +99,19 @@ object Matches : IntIdTable("matches") {
     val location = varchar("location", 255).nullable()
 }
 
+// JAVÍTVA: Név helyett userId a biztonságos kapcsolatokért
 object MatchParticipants : IntIdTable("match_participants") {
     val matchId = reference("match_id", Matches).index()
-    val playerName = varchar("player_name", 100)
+    val userId = reference("user_id", Users)
     val teamSide = varchar("team_side", 10) // 'HOME', 'GUEST'
     val status = varchar("status", 20).default("APPLIED") // 'APPLIED', 'SELECTED'
 }
 
+// JAVÍTVA: Név helyett ID a biztonságos kapcsolatokért
 object IndividualMatches : IntIdTable("individual_matches") {
     val matchId = reference("match_id", Matches).index()
-    val homePlayerName = varchar("home_player_name", 100)
-    val guestPlayerName = varchar("guest_player_name", 100)
+    val homePlayerId = reference("home_player_id", Users)
+    val guestPlayerId = reference("guest_player_id", Users)
     val homeScore = integer("home_score").default(0)
     val guestScore = integer("guest_score").default(0)
     val homeSetsWon = integer("home_sets_won").default(0)
@@ -158,6 +161,11 @@ fun initDataSource(): HikariDataSource {
 fun initDatabase(ds: HikariDataSource): Database {
     val db = Database.connect(ds)
     transaction(db) {
+        SchemaUtils.drop(
+            Players, FcmTokens, Users, Clubs, Teams, TeamMembers, Seasons,
+            Matches, IndividualMatches, MatchParticipants
+        )
+
         SchemaUtils.createMissingTablesAndColumns(
             Players, FcmTokens, Users, Clubs, Teams, TeamMembers, Seasons,
             Matches, IndividualMatches, MatchParticipants
@@ -188,8 +196,8 @@ fun playIndividualMatch(matchId: EntityID<Int>, hPlayerUserId: EntityID<Int>, gP
 
     IndividualMatches.insert {
         it[IndividualMatches.matchId] = matchId
-        it[homePlayerName] = "User ${hPlayerUserId.value}"
-        it[guestPlayerName] = "User ${gPlayerUserId.value}"
+        it[homePlayerId] = hPlayerUserId
+        it[guestPlayerId] = gPlayerUserId
         it[homeScore] = homeSets
         it[guestScore] = guestSets
         it[homeSetsWon] = homeSets
@@ -239,23 +247,17 @@ fun seedDatabaseIfNeeded() {
             it[location] = "Budapest, Mérnök u. 35, 1119"
         }
 
-        val homePlayers = (TeamMembers innerJoin Users)
-            .select { TeamMembers.teamId eq hId }
-            .map { "${it[Users.lastName]} ${it[Users.firstName]}" }
-
-        homePlayers.forEach { pName ->
+        val homePlayers = TeamMembers.select { TeamMembers.teamId eq hId }.map { it[TeamMembers.userId] }
+        homePlayers.forEach { uId ->
             MatchParticipants.insert {
-                it[matchId] = mId; it[playerName] = pName; it[teamSide] = "HOME"; it[status] = "SELECTED"
+                it[matchId] = mId; it[userId] = uId; it[teamSide] = "HOME"; it[status] = "SELECTED"
             }
         }
 
-        val guestPlayers = (TeamMembers innerJoin Users)
-            .select { TeamMembers.teamId eq gId }
-            .map { "${it[Users.lastName]} ${it[Users.firstName]}" }
-
-        guestPlayers.forEach { pName ->
+        val guestPlayers = TeamMembers.select { TeamMembers.teamId eq gId }.map { it[TeamMembers.userId] }
+        guestPlayers.forEach { uId ->
             MatchParticipants.insert {
-                it[matchId] = mId; it[playerName] = pName; it[teamSide] = "GUEST"; it[status] = "SELECTED"
+                it[matchId] = mId; it[userId] = uId; it[teamSide] = "GUEST"; it[status] = "SELECTED"
             }
         }
 
@@ -295,7 +297,6 @@ fun sendFcmNotification(db: Database, email: String, token: String, title: Strin
         } catch (e: Exception) {
             appLog.error("❌ FCM küldési hiba: ${e.message}")
 
-            // HA A TOKEN MÁR NEM LÉTEZIK (Törölték az appot, vagy lejárt)
             if (e.message?.contains("Requested entity was not found") == true || e.message?.contains("UNREGISTERED") == true) {
                 appLog.info("🧹 Halott token észlelve! Törlés az adatbázisból: $email")
                 transaction(db) {
@@ -307,15 +308,12 @@ fun sendFcmNotification(db: Database, email: String, token: String, title: Strin
 }
 
 fun savePlayer(db: Database, player: NewPlayerDTO): PlayerDTO {
-    appLog.info("💾 Játékos mentése adatbázisba: ${player.name}")
     val id = transaction(db) {
         Players.insertAndGetId {
             it[name] = player.name; it[age] = player.age; it[email] = player.email
         }.value
     }
-    val savedPlayer = PlayerDTO(id, player.name, player.age, player.email)
-    appLog.info("✅ Játékos sikeresen mentve. ID: $id")
-    return savedPlayer
+    return PlayerDTO(id, player.name, player.age, player.email)
 }
 
 // ---------------- Main ----------------
@@ -379,11 +377,10 @@ fun Application.module(db: Database) {
     routing {
 
         // ====================================================================
-        // NYILVÁNOS VÉGPONTOK (Nem kell token)
+        // NYILVÁNOS VÉGPONTOK
         // ====================================================================
 
         get("/teams") {
-            appLog.info("📥 GET /teams lekérdezés...")
             try {
                 val teamsResponse = transaction(db) {
                     Teams.selectAll().map { teamRow ->
@@ -440,55 +437,63 @@ fun Application.module(db: Database) {
 
         get("/matches") {
             val round = call.request.queryParameters["round"]?.toIntOrNull()
-            val matches = transaction(db) {
-                val query = if (round != null) Matches.select { Matches.roundNumber eq round } else Matches.selectAll()
+            try {
+                val matches = transaction(db) {
+                    val query = if (round != null) Matches.select { Matches.roundNumber eq round } else Matches.selectAll()
 
-                query.map { matchRow ->
-                    val mId = matchRow[Matches.id].value
+                    query.map { matchRow ->
+                        val mId = matchRow[Matches.id].value
+                        val homeTeamEntityId = matchRow[Matches.homeTeamId]
+                        val guestTeamEntityId = matchRow[Matches.guestTeamId]
+                        val homeName = Teams.select { Teams.id eq homeTeamEntityId }.single()[Teams.name]
+                        val guestName = Teams.select { Teams.id eq guestTeamEntityId }.single()[Teams.name]
 
-                    val homeTeamEntityId = matchRow[Matches.homeTeamId]
-                    val guestTeamEntityId = matchRow[Matches.guestTeamId]
-                    val homeName = Teams.select { Teams.id eq homeTeamEntityId }.single()[Teams.name]
-                    val guestName = Teams.select { Teams.id eq guestTeamEntityId }.single()[Teams.name]
+                        val individualMatches = IndividualMatches.select { IndividualMatches.matchId eq mId }.map { imRow ->
+                            val homeUserRow = Users.select { Users.id eq imRow[IndividualMatches.homePlayerId] }.single()
+                            val guestUserRow = Users.select { Users.id eq imRow[IndividualMatches.guestPlayerId] }.single()
+                            IndividualMatchDTO(
+                                id = imRow[IndividualMatches.id].value,
+                                homePlayerId = imRow[IndividualMatches.homePlayerId].value,
+                                homePlayerName = "${homeUserRow[Users.lastName]} ${homeUserRow[Users.firstName]}",
+                                guestPlayerId = imRow[IndividualMatches.guestPlayerId].value,
+                                guestPlayerName = "${guestUserRow[Users.lastName]} ${guestUserRow[Users.firstName]}",
+                                homeScore = imRow[IndividualMatches.homeScore],
+                                guestScore = imRow[IndividualMatches.guestScore]
+                            )
+                        }
 
-                    val individualMatches = IndividualMatches.select { IndividualMatches.matchId eq mId }.map { imRow ->
-                        IndividualMatchDTO(
-                            id = imRow[IndividualMatches.id].value,
-                            homePlayerName = imRow[IndividualMatches.homePlayerName],
-                            guestPlayerName = imRow[IndividualMatches.guestPlayerName],
-                            homeScore = imRow[IndividualMatches.homeScore],
-                            guestScore = imRow[IndividualMatches.guestScore]
+                        val participants = (MatchParticipants innerJoin Users).select { MatchParticipants.matchId eq mId }.map { mpRow ->
+                            MatchParticipantDTO(
+                                id = mpRow[MatchParticipants.id].value,
+                                userId = mpRow[Users.id].value,
+                                playerName = "${mpRow[Users.lastName]} ${mpRow[Users.firstName]}",
+                                teamSide = mpRow[MatchParticipants.teamSide],
+                                status = mpRow[MatchParticipants.status]
+                            )
+                        }
+
+                        MatchDTO(
+                            id = matchRow[Matches.id].value,
+                            roundNumber = matchRow[Matches.roundNumber] ?: 0,
+                            homeTeamName = homeName,
+                            guestTeamName = guestName,
+                            homeScore = matchRow[Matches.homeTeamScore],
+                            guestScore = matchRow[Matches.guestTeamScore],
+                            date = matchRow[Matches.matchDate]?.toString() ?: "",
+                            status = matchRow[Matches.status],
+                            location = matchRow[Matches.location] ?: "",
+                            homeTeamId = homeTeamEntityId.value,
+                            guestTeamId = guestTeamEntityId.value,
+                            individualMatches = individualMatches,
+                            participants = participants
                         )
                     }
-
-                    val participants = MatchParticipants.select { MatchParticipants.matchId eq mId }.map { mpRow ->
-                        MatchParticipantDTO(
-                            id = mpRow[MatchParticipants.id].value,
-                            playerName = mpRow[MatchParticipants.playerName],
-                            teamSide = mpRow[MatchParticipants.teamSide],
-                            status = mpRow[MatchParticipants.status]
-                        )
-                    }
-
-                    MatchDTO(
-                        id = matchRow[Matches.id].value,
-                        roundNumber = matchRow[Matches.roundNumber] ?: 0,
-                        homeTeamName = homeName,
-                        guestTeamName = guestName,
-                        homeScore = matchRow[Matches.homeTeamScore],
-                        guestScore = matchRow[Matches.guestTeamScore],
-                        date = matchRow[Matches.matchDate]?.toString() ?: "",
-                        status = matchRow[Matches.status],
-                        location = matchRow[Matches.location] ?: "",
-                        // --- HOZZÁADVA AZ ID-K ---
-                        homeTeamId = homeTeamEntityId.value,
-                        guestTeamId = guestTeamEntityId.value,
-                        individualMatches = individualMatches,
-                        participants = participants
-                    )
                 }
+                call.respond(matches)
+            } catch (e: Exception) {
+                appLog.error("Hiba a /matches lekérdezésekor: ${e.message}", e)
+                call.respond(HttpStatusCode.InternalServerError, "Adatbázis hiba történt")
             }
-            call.respond(matches)
         }
 
         post("/send_fcm_notification") {
@@ -657,7 +662,6 @@ fun Application.module(db: Database) {
                     if (userRow == null) return@transaction Pair(HttpStatusCode.NotFound, "User nem található")
 
                     val userId = userRow[Users.id]
-                    val userName = "${userRow[Users.lastName]} ${userRow[Users.firstName]}"
 
                     val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull()
                     if (matchRow == null) return@transaction Pair(HttpStatusCode.NotFound, "Meccs nem található")
@@ -671,12 +675,12 @@ fun Application.module(db: Database) {
                         else -> return@transaction Pair(HttpStatusCode.Forbidden, "Nem vagy tagja egyik csapatnak sem!")
                     }
 
-                    val alreadyApplied = MatchParticipants.select { (MatchParticipants.matchId eq matchId) and (MatchParticipants.playerName eq userName) }.count() > 0
+                    val alreadyApplied = MatchParticipants.select { (MatchParticipants.matchId eq matchId) and (MatchParticipants.userId eq userId) }.count() > 0
                     if (alreadyApplied) return@transaction Pair(HttpStatusCode.Conflict, "Már jelentkeztél erre a meccsre!")
 
                     MatchParticipants.insert {
                         it[MatchParticipants.matchId] = matchId
-                        it[MatchParticipants.playerName] = userName
+                        it[MatchParticipants.userId] = userId
                         it[MatchParticipants.teamSide] = teamSide
                         it[MatchParticipants.status] = "APPLIED"
                     }
@@ -694,7 +698,8 @@ fun Application.module(db: Database) {
                 val result: Pair<HttpStatusCode, Any> = transaction(db) {
                     val userRow = Users.select { Users.firebaseUid eq firebaseUid }.singleOrNull()
                     if (userRow == null) return@transaction Pair(HttpStatusCode.NotFound, "User nem található")
-                    val userName = "${userRow[Users.lastName]} ${userRow[Users.firstName]}"
+
+                    val userId = userRow[Users.id]
 
                     val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull()
                     if (matchRow == null) return@transaction Pair(HttpStatusCode.NotFound, "Meccs nem található")
@@ -704,7 +709,7 @@ fun Application.module(db: Database) {
                     }
 
                     val deletedRows = MatchParticipants.deleteWhere {
-                        (MatchParticipants.matchId eq matchId) and (MatchParticipants.playerName eq userName)
+                        (MatchParticipants.matchId eq matchId) and (MatchParticipants.userId eq userId)
                     }
 
                     if (deletedRows > 0) Pair(HttpStatusCode.OK, mapOf("status" to "withdrawn"))
@@ -719,66 +724,53 @@ fun Application.module(db: Database) {
                 val firebaseUid = principal?.name ?: return@post call.respond(HttpStatusCode.Unauthorized)
                 val matchId = call.parameters["matchId"]?.toIntOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, "Invalid Match ID")
 
-                // 1. ADATGYŰJTÉS (Rövid tranzakció)
-                val notificationTask = transaction(db) {
-                    val userRow = Users.select { Users.firebaseUid eq firebaseUid }.singleOrNull()
-                        ?: return@transaction null
-                    val userId = userRow[Users.id]
+                try {
+                    val notificationData = transaction(db) {
+                        val userRow = Users.select { Users.firebaseUid eq firebaseUid }.singleOrNull() ?: return@transaction null
+                        val captainUserId = userRow[Users.id]
 
-                    val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull()
-                        ?: return@transaction null
+                        val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull() ?: return@transaction null
 
-                    // Kapitány ellenőrzése
-                    val isHomeCap = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.homeTeamId]) and (TeamMembers.userId eq userId) and (TeamMembers.isCaptain eq true) }.count() > 0
-                    val isGuestCap = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.guestTeamId]) and (TeamMembers.userId eq userId) and (TeamMembers.isCaptain eq true) }.count() > 0
+                        val isHomeCap = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.homeTeamId]) and (TeamMembers.userId eq captainUserId) and (TeamMembers.isCaptain eq true) }.count() > 0
+                        val isGuestCap = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.guestTeamId]) and (TeamMembers.userId eq captainUserId) and (TeamMembers.isCaptain eq true) }.count() > 0
 
-                    if (!isHomeCap && !isGuestCap) return@transaction null // Jogosultság hiba
+                        if (!isHomeCap && !isGuestCap) return@transaction null
 
-                    val teamSide = if (isHomeCap) "HOME" else "GUEST"
+                        val teamSide = if (isHomeCap) "HOME" else "GUEST"
 
-                    // Meccs státusz frissítése
-                    Matches.update({ Matches.id eq matchId }) {
-                        it[status] = "in_progress"
+                        Matches.update({ Matches.id eq matchId }) { it[status] = "in_progress" }
+
+                        // TÖKÉLETES SQL JOIN AZ ID ALAPJÁN
+                        val tokensWithEmails = (MatchParticipants innerJoin Users innerJoin FcmTokens)
+                            .slice(Users.email, FcmTokens.token)
+                            .select {
+                                (MatchParticipants.matchId eq matchId) and
+                                        (MatchParticipants.teamSide eq teamSide) and
+                                        (MatchParticipants.status eq "SELECTED") and
+                                        (MatchParticipants.userId neq captainUserId)
+                            }
+                            .map { Pair(it[Users.email], it[FcmTokens.token]) }
+
+                        val homeTeamName = Teams.select { Teams.id eq matchRow[Matches.homeTeamId] }.single()[Teams.name]
+                        val guestTeamName = Teams.select { Teams.id eq matchRow[Matches.guestTeamId] }.single()[Teams.name]
+
+                        Pair(tokensWithEmails, "$homeTeamName vs $guestTeamName")
                     }
 
-                    // Érintett játékosok és tokenjeik kigyűjtése
-                    val playersToNotify = (MatchParticipants innerJoin Users innerJoin FcmTokens)
-                        .slice(Users.email, FcmTokens.token)
-                        .select {
-                            (MatchParticipants.matchId eq matchId) and
-                                    (MatchParticipants.teamSide eq teamSide) and
-                                    (MatchParticipants.status eq "SELECTED") and
-                                    (Users.firebaseUid neq firebaseUid) // Kapitány kizárva
-                        }
-                        .map { row ->
-                            Pair(row[Users.email], row[FcmTokens.token])
-                        }
-
-                    val matchTitle = "${Teams.select { Teams.id eq matchRow[Matches.homeTeamId] }.single()[Teams.name]} vs ${Teams.select { Teams.id eq matchRow[Matches.guestTeamId] }.single()[Teams.name]}"
-
-                    // Visszaadjuk a listát és az adatokat a tranzakción kívülre
-                    Pair(playersToNotify, matchTitle)
-                }
-
-                // 2. VÁLASZADÁS AZONNAL
-                if (notificationTask == null) {
-                    call.respond(HttpStatusCode.Forbidden, "Hiba az indításkor: nincs jogosultság vagy nem található a meccs.")
-                } else {
-                    call.respond(HttpStatusCode.OK, mapOf("status" to "finalized"))
-
-                    // 3. ÉRTESÍTÉSEK KÜLDÉSE A HÁTTÉRBEN (Már tranzakción kívül!)
-                    applicationScope.launch {
-                        val (players, title) = notificationTask
-                        players.forEach { (email, token) ->
-                            sendFcmNotification(
-                                db = db,
-                                email = email,
-                                token = token,
-                                title = "A mérkőzés elindult! 🏁",
-                                body = "A keret véglegesítve lett a $title meccsre."
-                            )
+                    if (notificationData == null) {
+                        call.respond(HttpStatusCode.Forbidden, "Hiba az indításkor: nincs jogosultság vagy nem található a meccs.")
+                    } else {
+                        call.respond(HttpStatusCode.OK, mapOf("status" to "finalized"))
+                        applicationScope.launch {
+                            val (players, title) = notificationData
+                            players.forEach { (email, token) ->
+                                sendFcmNotification(db, email, token, "A mérkőzés elindult! 🏁", "A keret véglegesítve lett a $title meccsre.")
+                            }
                         }
                     }
+                } catch (e: Exception) {
+                    appLog.error("Hiba a véglegesítésnél: ${e.message}", e)
+                    call.respond(HttpStatusCode.InternalServerError, "Szerver oldali hiba: ${e.message}")
                 }
             }
 
@@ -797,59 +789,33 @@ fun Application.module(db: Database) {
                 }
 
                 if (rowsUpdated > 0) {
-                    // --- ÚJ: PUSH NOTIFICATION KÜLDÉSE (Háttérszálon) ---
                     if (request.status == "SELECTED") {
                         applicationScope.launch {
                             try {
-                                appLog.info("📢 Push értesítés logikája indul a participantId=$participantId számára")
                                 val notificationData = transaction(db) {
                                     val pRow = MatchParticipants.select { MatchParticipants.id eq participantId }.single()
-                                    val pName = pRow[MatchParticipants.playerName]
                                     val mId = pRow[MatchParticipants.matchId]
-                                    appLog.info("📢 Résztvevő neve: $pName, Meccs ID: $mId")
+                                    val uId = pRow[MatchParticipants.userId]
 
-                                    val userRow = Users.selectAll().firstOrNull {
-                                        "${it[Users.lastName]} ${it[Users.firstName]}" == pName
-                                    }
+                                    val userRow = Users.select { Users.id eq uId }.single()
+                                    val email = userRow[Users.email]
+                                    val token = FcmTokens.select { FcmTokens.email eq email }.singleOrNull()?.get(FcmTokens.token)
 
-                                    if (userRow != null) {
-                                        val email = userRow[Users.email]
-                                        appLog.info("📢 Felhasználó megtalálva! Email: $email")
-                                        val token = FcmTokens.select { FcmTokens.email eq email }.singleOrNull()?.get(FcmTokens.token)
+                                    val matchRow = Matches.select { Matches.id eq mId }.single()
+                                    val homeTeamName = Teams.select { Teams.id eq matchRow[Matches.homeTeamId] }.single()[Teams.name]
+                                    val guestTeamName = Teams.select { Teams.id eq matchRow[Matches.guestTeamId] }.single()[Teams.name]
 
-                                        val matchRow = Matches.select { Matches.id eq mId }.single()
-                                        val homeTeamName = Teams.select { Teams.id eq matchRow[Matches.homeTeamId] }.single()[Teams.name]
-                                        val guestTeamName = Teams.select { Teams.id eq matchRow[Matches.guestTeamId] }.single()[Teams.name]
-
-                                        if (token != null) {
-                                            appLog.info("📢 FCM Token megtalálva a $email címhez: $token")
-                                            Triple(token, "$homeTeamName vs $guestTeamName", matchRow[Matches.matchDate].toString())
-                                        } else {
-                                            appLog.warn("⚠️ Nincs FCM token regisztrálva a $email címhez!")
-                                            null
-                                        }
-                                    } else {
-                                        appLog.warn("⚠️ Nem találtunk Users rekordot a '$pName' névhez!")
-                                        null
-                                    }
+                                    if (token != null) Triple(token, "$homeTeamName vs $guestTeamName", email) else null
                                 }
 
                                 notificationData?.let { (token, matchName, targetEmail) ->
-                                    sendFcmNotification(
-                                        db = db,
-                                        email = targetEmail, // Ezt előzőleg a Triple-ben stringként kell visszaadni!
-                                        token = token,
-                                        title = "Bekerültél a keretbe! 🏀",
-                                        body = "A kapitány kiválasztott a $matchName mérkőzésre!"
-                                    )
+                                    sendFcmNotification(db, targetEmail, token, "Bekerültél a keretbe! 🏀", "A kapitány kiválasztott a $matchName mérkőzésre!")
                                 }
                             } catch (e: Exception) {
                                 appLog.error("❌ Hiba az értesítés előkészítésekor: ${e.message}")
                             }
                         }
                     }
-                    // ----------------------------------------------------
-
                     call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
                 } else {
                     call.respond(HttpStatusCode.NotFound, "Jelentkezési adat nem található")

@@ -87,8 +87,10 @@ data class ParticipantStatusUpdateDTO(
 @Serializable
 data class IndividualMatchDTO(
     val id: Int,
-    val homePlayerName: String, // TODO user id alapján nevet lekérése
-    val guestPlayerName: String, // TODO user id alapján nevet lekérése
+    val homePlayerId: Int,
+    val homePlayerName: String,
+    val guestPlayerId: Int,
+    val guestPlayerName: String,
     val homeScore: Int,
     val guestScore: Int
 )
@@ -96,7 +98,8 @@ data class IndividualMatchDTO(
 @Serializable
 data class MatchParticipantDTO(
     val id: Int,
-    val playerName: String, // TODO user id alapján nevet lekérése
+    val userId: Int,
+    val playerName: String,
     val teamSide: String, // "HOME" vagy "GUEST"
     val status: String    // "APPLIED" vagy "SELECTED"
 )
