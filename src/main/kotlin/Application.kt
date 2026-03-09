@@ -873,15 +873,18 @@ fun Application.module(db: Database) {
 
                 try {
                     val isMatchReadyForGrid = transaction(db) {
-                        // 1. Jogosultság (Kapitány-e?)
+                        // 1. Jogosultság (Csapattag-e?)
                         val userRow = Users.select { Users.firebaseUid eq firebaseUid }.singleOrNull() ?: throw Exception("User not found")
-                        val captainUserId = userRow[Users.id]
+                        val submittingUserId = userRow[Users.id]
                         val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull() ?: throw Exception("Match not found")
 
-                        // Ellenőrizzük, hogy kapitány-e abban a csapatban, amelyiknek a nevét be akarja küldeni
+                        // JAVÍTVA: Csak azt nézzük, hogy tagja-e a csapatnak (nem kell kapitánynak lennie)
                         val targetTeamId = if (lineupRequest.teamSide == "HOME") matchRow[Matches.homeTeamId] else matchRow[Matches.guestTeamId]
-                        val isCap = TeamMembers.select { (TeamMembers.teamId eq targetTeamId) and (TeamMembers.userId eq captainUserId) and (TeamMembers.isCaptain eq true) }.count() > 0
-                        if (!isCap) throw Exception("Nem vagy kapitány!")
+                        val isTeamMember = TeamMembers.select {
+                            (TeamMembers.teamId eq targetTeamId) and (TeamMembers.userId eq submittingUserId)
+                        }.count() > 0
+
+                        if (!isTeamMember) throw Exception("Nem vagy a csapat tagja, így nem adhatsz le sorrendet!")
 
                         if (lineupRequest.positions.size != 4) throw Exception("Pontosan 4 játékost kell megadni a sorrendhez!")
 
@@ -898,7 +901,6 @@ fun Application.module(db: Database) {
                         }
 
                         // 3. Megnézzük, hogy a TÖBBI csapat leadta-e már a sorrendet?
-                        // (Keresünk olyan játékost a meccsen, akinek van pozíciója, de a státusza még nem LOCKED, vagy egyáltalán nincs 4 db LOCKED ember a másik oldalon)
                         val otherSide = if (lineupRequest.teamSide == "HOME") "GUEST" else "HOME"
                         val otherSideLockedCount = MatchParticipants.select {
                             (MatchParticipants.matchId eq matchId) and
@@ -906,14 +908,12 @@ fun Application.module(db: Database) {
                                     (MatchParticipants.status eq "LOCKED")
                         }.count()
 
-                        // Visszaadjuk true-t, ha már a másik oldal is véglegesítette a maga 4 emberét
                         otherSideLockedCount == 4L
                     }
 
                     // 4. HA MINDKÉT OLDAL MEGVOLT -> GENERÁLJUK A 16 MECCSET!
                     if (isMatchReadyForGrid) {
                         transaction(db) {
-                            // Lekérjük a két csapat véglegesített sorrendjét
                             val homePlayersByPos = MatchParticipants.select { (MatchParticipants.matchId eq matchId) and (MatchParticipants.teamSide eq "HOME") and (MatchParticipants.status eq "LOCKED") }
                                 .associate { it[MatchParticipants.position]!! to it[MatchParticipants.userId] }
 
@@ -928,10 +928,8 @@ fun Application.module(db: Database) {
                                 Pair(1, 4), Pair(2, 1), Pair(3, 2), Pair(4, 3)  // 4. kör
                             )
 
-                            // Töröljük a korábbi generálást, ha esetleg beragadt volna valami
                             IndividualMatches.deleteWhere { IndividualMatches.matchId eq matchId }
 
-                            // Beszúrjuk a 16 meccset sorrendben
                             pairings.forEachIndexed { index, pair ->
                                 val hPlayerId = homePlayersByPos[pair.first]
                                 val gPlayerId = guestPlayersByPos[pair.second]
@@ -941,7 +939,7 @@ fun Application.module(db: Database) {
                                         it[this.matchId] = matchId
                                         it[this.homePlayerId] = hPlayerId
                                         it[this.guestPlayerId] = gPlayerId
-                                        it[this.orderNumber] = index + 1 // 1-től 16-ig
+                                        it[this.orderNumber] = index + 1
                                         it[this.status] = "pending"
                                     }
                                 }
