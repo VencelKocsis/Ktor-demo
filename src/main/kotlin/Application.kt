@@ -945,7 +945,7 @@ fun Application.module(db: Database) {
                                         it[this.homePlayerId] = hPlayerId
                                         it[this.guestPlayerId] = gPlayerId
                                         it[this.orderNumber] = index + 1
-                                        it[this.status] = "pending"
+                                        it[this.status] = if (index < 2) "in_progress" else "pending"
                                     }
                                 }
                             }
@@ -962,7 +962,7 @@ fun Application.module(db: Database) {
                 }
             }
 
-            // --- EGYÉNI MECCS PONTOZÁSA ---
+            // --- EGYÉNI MECCS PONTOZÁSA ÉS AUTOMATIKUS LÉPTETÉS ---
             put("/matches/individual/{id}/score") {
                 val principal = call.principal<UserIdPrincipal>()
                 if (principal == null) return@put call.respond(HttpStatusCode.Unauthorized)
@@ -971,25 +971,57 @@ fun Application.module(db: Database) {
                 val request = call.receive<ScoreSubmitDTO>()
 
                 try {
-                    val rowsAffected = transaction(db) {
-                        IndividualMatches.update({ IndividualMatches.id eq individualMatchId }) {
+                    val result = transaction(db) {
+                        // 1. Frissítjük az aktuális meccs állását
+                        val rowsAffected = IndividualMatches.update({ IndividualMatches.id eq individualMatchId }) {
                             it[homeScore] = request.homeScore
                             it[guestScore] = request.guestScore
-                            it[homeSetsWon] = request.homeScore // Kompatibilitás miatt
+                            it[homeSetsWon] = request.homeScore
                             it[guestSetsWon] = request.guestScore
                             it[setScores] = request.setScores
                             it[status] = request.status
                         }
+
+                        // 2. Ha a meccs lezárult, elindítjuk a következőt, hogy újra 2 aktív legyen
+                        if (rowsAffected > 0 && request.status == "finished") {
+                            // Megkeressük a szülő csapatmeccs ID-ját, hogy csak abban léptessünk
+                            val parentMatchId = IndividualMatches
+                                .slice(IndividualMatches.matchId)
+                                .select { IndividualMatches.id eq individualMatchId }
+                                .singleOrNull()?.get(IndividualMatches.matchId)
+
+                            if (parentMatchId != null) {
+                                // Megszámoljuk, hány meccs van JELENLEG folyamatban
+                                val activeCount = IndividualMatches
+                                    .select { (IndividualMatches.matchId eq parentMatchId) and (IndividualMatches.status eq "in_progress") }
+                                    .count()
+
+                                // Ha kevesebb, mint 2 meccs pörög, aktiváljuk a következőt a sorrend (orderNumber) alapján
+                                val neededCount = 2 - activeCount.toInt()
+                                if (neededCount > 0) {
+                                    val nextMatchesToStart = IndividualMatches
+                                        .select { (IndividualMatches.matchId eq parentMatchId) and (IndividualMatches.status eq "pending") }
+                                        .orderBy(IndividualMatches.orderNumber to SortOrder.ASC)
+                                        .limit(neededCount)
+                                        .map { it[IndividualMatches.id] }
+
+                                    IndividualMatches.update({ IndividualMatches.id inList nextMatchesToStart }) {
+                                        it[status] = "in_progress"
+                                    }
+                                }
+                            }
+                        }
+                        rowsAffected
                     }
 
-                    if (rowsAffected > 0) {
+                    if (result > 0) {
                         call.respond(HttpStatusCode.OK, mapOf("status" to "score_updated"))
                     } else {
                         call.respond(HttpStatusCode.NotFound, "Meccs nem található")
                     }
                 } catch (e: Exception) {
                     appLog.error("Hiba a pontozásnál: ${e.message}", e)
-                    call.respond(HttpStatusCode.InternalServerError, "Szerver hiba")
+                    call.respond(HttpStatusCode.InternalServerError, "Szerver hiba: ${e.message}")
                 }
             }
         }
