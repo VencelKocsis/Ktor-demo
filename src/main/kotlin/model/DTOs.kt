@@ -94,9 +94,10 @@ data class LineupSubmitDTO(
 data class MatchParticipantDTO(
     val id: Int,
     val userId: Int,
+    val firebaseUid: String? = null,
     val playerName: String,
     val teamSide: String, // "HOME" vagy "GUEST"
-    val status: String, // "APPLIED" vagy "SELECTED"
+    val status: String, // "APPLIED", "SELECTED" vagy "LOCKED"
     val position: Int? = null
 )
 

@@ -467,7 +467,10 @@ fun Application.module(db: Database) {
                                 guestPlayerId = imRow[IndividualMatches.guestPlayerId].value,
                                 guestPlayerName = "${guestUserRow[Users.lastName]} ${guestUserRow[Users.firstName]}",
                                 homeScore = imRow[IndividualMatches.homeScore],
-                                guestScore = imRow[IndividualMatches.guestScore]
+                                guestScore = imRow[IndividualMatches.guestScore],
+                                setScores = imRow[IndividualMatches.setScores],
+                                status = imRow[IndividualMatches.status],
+                                orderNumber = imRow[IndividualMatches.orderNumber]
                             )
                         }
 
@@ -475,9 +478,11 @@ fun Application.module(db: Database) {
                             MatchParticipantDTO(
                                 id = mpRow[MatchParticipants.id].value,
                                 userId = mpRow[Users.id].value,
+                                firebaseUid = mpRow[Users.firebaseUid],
                                 playerName = "${mpRow[Users.lastName]} ${mpRow[Users.firstName]}",
                                 teamSide = mpRow[MatchParticipants.teamSide],
-                                status = mpRow[MatchParticipants.status]
+                                status = mpRow[MatchParticipants.status],
+                                position = mpRow[MatchParticipants.position]
                             )
                         }
 
