@@ -736,20 +736,37 @@ fun Application.module(db: Database) {
                         val captainUserId = userRow[Users.id]
                         val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull() ?: return@transaction null
 
+                        // 1. Jogosultság ellenőrzése
                         val isHomeCap = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.homeTeamId]) and (TeamMembers.userId eq captainUserId) and (TeamMembers.isCaptain eq true) }.count() > 0
                         val isGuestCap = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.guestTeamId]) and (TeamMembers.userId eq captainUserId) and (TeamMembers.isCaptain eq true) }.count() > 0
 
                         if (!isHomeCap && !isGuestCap) return@transaction null
 
-                        val teamSide = if (isHomeCap) "HOME" else "GUEST"
+                        // 2. ÚJ LOGIKA: Mindkét csapat létszámának ellenőrzése
+                        val homeSelectedCount = MatchParticipants.select {
+                            (MatchParticipants.matchId eq matchId) and
+                                    (MatchParticipants.teamSide eq "HOME") and
+                                    (MatchParticipants.status eq "SELECTED")
+                        }.count()
 
+                        val guestSelectedCount = MatchParticipants.select {
+                            (MatchParticipants.matchId eq matchId) and
+                                    (MatchParticipants.teamSide eq "GUEST") and
+                                    (MatchParticipants.status eq "SELECTED")
+                        }.count()
+
+                        if (homeSelectedCount < 4 || guestSelectedCount < 4) {
+                            throw IllegalArgumentException("Mindkét csapatból legalább 4 játékos kiválasztása szükséges a meccs indításához!")
+                        }
+
+                        // 3. Meccs elindítása
                         Matches.update({ Matches.id eq matchId }) { it[status] = "in_progress" }
 
+                        // 4. Értesítendők kigyűjtése (Mindenki, aki be lett válogatva, kivéve az indító kapitány)
                         val tokensWithEmails = (MatchParticipants innerJoin Users innerJoin FcmTokens)
                             .slice(Users.email, FcmTokens.token)
                             .select {
                                 (MatchParticipants.matchId eq matchId) and
-                                        (MatchParticipants.teamSide eq teamSide) and
                                         (MatchParticipants.status eq "SELECTED") and
                                         (MatchParticipants.userId neq captainUserId)
                             }
@@ -762,16 +779,20 @@ fun Application.module(db: Database) {
                     }
 
                     if (notificationData == null) {
-                        call.respond(HttpStatusCode.Forbidden, "Hiba az indításkor: nincs jogosultság.")
+                        call.respond(HttpStatusCode.Forbidden, "Hiba az indításkor: nincs jogosultság vagy nem található a meccs.")
                     } else {
                         call.respond(HttpStatusCode.OK, mapOf("status" to "finalized"))
                         applicationScope.launch {
                             val (players, title) = notificationData
                             players.forEach { (email, token) ->
-                                sendFcmNotification(db, email, token, "A mérkőzés elindult! 🏁", "A keret véglegesítve lett a $title meccsre.")
+                                sendFcmNotification(db, email, token, "A mérkőzés elindult! 🏁", "A $title meccs hivatalosan megkezdődött.")
                             }
                         }
                     }
+                } catch (e: IllegalArgumentException) {
+                    // Ha a mi létszám-ellenőrzésünk bukik el, szép 400-as hibát küldünk
+                    appLog.warn("Sikertelen indítási kísérlet: ${e.message}")
+                    call.respond(HttpStatusCode.BadRequest, e.message ?: "Hiányzó játékosok.")
                 } catch (e: Exception) {
                     appLog.error("Hiba a véglegesítésnél: ${e.message}", e)
                     call.respond(HttpStatusCode.InternalServerError, "Szerver oldali hiba: ${e.message}")
