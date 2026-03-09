@@ -98,24 +98,37 @@ object Matches : IntIdTable("matches") {
     val location = varchar("location", 255).nullable()
 }
 
-// JAVÍTVA: Név helyett userId a biztonságos kapcsolatokért
 object MatchParticipants : IntIdTable("match_participants") {
     val matchId = reference("match_id", Matches).index()
     val userId = reference("user_id", Users)
     val teamSide = varchar("team_side", 10) // 'HOME', 'GUEST'
-    val status = varchar("status", 20).default("APPLIED") // 'APPLIED', 'SELECTED'
+    val status = varchar("status", 20).default("APPLIED") // 'APPLIED', 'SELECTED', 'LOCKED'
+
+    // A játékos pozíciója a csapaton belül (1, 2, 3 vagy 4)
+    // Null, amíg a kapitány be nem állítja.
+    val position = integer("position").nullable()
 }
 
-// JAVÍTVA: Név helyett ID a biztonságos kapcsolatokért
 object IndividualMatches : IntIdTable("individual_matches") {
     val matchId = reference("match_id", Matches).index()
     val homePlayerId = reference("home_player_id", Users)
     val guestPlayerId = reference("guest_player_id", Users)
-    val homeScore = integer("home_score").default(0)
-    val guestScore = integer("guest_score").default(0)
+
+    // Hanyadik meccs a 16-ból? (Sorrend a megjelenítéshez)
+    val orderNumber = integer("order_number").default(0)
+
+    val homeScore = integer("home_score").default(0) // Szettek (pl 3)
+    val guestScore = integer("guest_score").default(0) // Szettek (pl 1)
+
+    // Ezt benne hagyjuk kompatibilitás miatt, bár ugyanazt tudja, mint a fenti kettő
     val homeSetsWon = integer("home_sets_won").default(0)
     val guestSetsWon = integer("guest_sets_won").default(0)
-    val setScores = varchar("set_scores", 100).nullable()
+
+    // A szettek részletes pontszámai (Pl: "11-8, 9-11, 11-5, 11-6")
+    val setScores = varchar("set_scores", 255).nullable()
+
+    // A meccs állapota
+    val status = varchar("status", 20).default("pending") // 'pending', 'in_progress', 'finished'
 }
 
 // ---------------- WebSocket események ----------------
@@ -848,6 +861,101 @@ fun Application.module(db: Database) {
                     call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
                 } else {
                     call.respond(HttpStatusCode.NotFound, "Jelentkezési adat nem található")
+                }
+            }
+
+            // --- SORREND LEADÁSA (LINEUP) ---
+            post("/matches/{matchId}/lineup") {
+                val principal = call.principal<UserIdPrincipal>()
+                val firebaseUid = principal?.name ?: return@post call.respond(HttpStatusCode.Unauthorized)
+                val matchId = call.parameters["matchId"]?.toIntOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, "Invalid Match ID")
+                val lineupRequest = call.receive<LineupSubmitDTO>()
+
+                try {
+                    val isMatchReadyForGrid = transaction(db) {
+                        // 1. Jogosultság (Kapitány-e?)
+                        val userRow = Users.select { Users.firebaseUid eq firebaseUid }.singleOrNull() ?: throw Exception("User not found")
+                        val captainUserId = userRow[Users.id]
+                        val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull() ?: throw Exception("Match not found")
+
+                        // Ellenőrizzük, hogy kapitány-e abban a csapatban, amelyiknek a nevét be akarja küldeni
+                        val targetTeamId = if (lineupRequest.teamSide == "HOME") matchRow[Matches.homeTeamId] else matchRow[Matches.guestTeamId]
+                        val isCap = TeamMembers.select { (TeamMembers.teamId eq targetTeamId) and (TeamMembers.userId eq captainUserId) and (TeamMembers.isCaptain eq true) }.count() > 0
+                        if (!isCap) throw Exception("Nem vagy kapitány!")
+
+                        if (lineupRequest.positions.size != 4) throw Exception("Pontosan 4 játékost kell megadni a sorrendhez!")
+
+                        // 2. Beírjuk a pozíciókat az adatbázisba (és a státuszt LOCKED-re tesszük)
+                        lineupRequest.positions.forEach { (pos, uId) ->
+                            MatchParticipants.update({
+                                (MatchParticipants.matchId eq matchId) and
+                                        (MatchParticipants.userId eq uId) and
+                                        (MatchParticipants.teamSide eq lineupRequest.teamSide)
+                            }) {
+                                it[position] = pos
+                                it[status] = "LOCKED"
+                            }
+                        }
+
+                        // 3. Megnézzük, hogy a TÖBBI csapat leadta-e már a sorrendet?
+                        // (Keresünk olyan játékost a meccsen, akinek van pozíciója, de a státusza még nem LOCKED, vagy egyáltalán nincs 4 db LOCKED ember a másik oldalon)
+                        val otherSide = if (lineupRequest.teamSide == "HOME") "GUEST" else "HOME"
+                        val otherSideLockedCount = MatchParticipants.select {
+                            (MatchParticipants.matchId eq matchId) and
+                                    (MatchParticipants.teamSide eq otherSide) and
+                                    (MatchParticipants.status eq "LOCKED")
+                        }.count()
+
+                        // Visszaadjuk true-t, ha már a másik oldal is véglegesítette a maga 4 emberét
+                        otherSideLockedCount == 4L
+                    }
+
+                    // 4. HA MINDKÉT OLDAL MEGVOLT -> GENERÁLJUK A 16 MECCSET!
+                    if (isMatchReadyForGrid) {
+                        transaction(db) {
+                            // Lekérjük a két csapat véglegesített sorrendjét
+                            val homePlayersByPos = MatchParticipants.select { (MatchParticipants.matchId eq matchId) and (MatchParticipants.teamSide eq "HOME") and (MatchParticipants.status eq "LOCKED") }
+                                .associate { it[MatchParticipants.position]!! to it[MatchParticipants.userId] }
+
+                            val guestPlayersByPos = MatchParticipants.select { (MatchParticipants.matchId eq matchId) and (MatchParticipants.teamSide eq "GUEST") and (MatchParticipants.status eq "LOCKED") }
+                                .associate { it[MatchParticipants.position]!! to it[MatchParticipants.userId] }
+
+                            // A hivatalos 16 meccses asztalitenisz párosítás mátrixa (Home Pos vs Guest Pos)
+                            val pairings = listOf(
+                                Pair(1, 1), Pair(2, 2), Pair(3, 3), Pair(4, 4), // 1. kör
+                                Pair(1, 2), Pair(2, 3), Pair(3, 4), Pair(4, 1), // 2. kör
+                                Pair(1, 3), Pair(2, 4), Pair(3, 1), Pair(4, 2), // 3. kör
+                                Pair(1, 4), Pair(2, 1), Pair(3, 2), Pair(4, 3)  // 4. kör
+                            )
+
+                            // Töröljük a korábbi generálást, ha esetleg beragadt volna valami
+                            IndividualMatches.deleteWhere { IndividualMatches.matchId eq matchId }
+
+                            // Beszúrjuk a 16 meccset sorrendben
+                            pairings.forEachIndexed { index, pair ->
+                                val hPlayerId = homePlayersByPos[pair.first]
+                                val gPlayerId = guestPlayersByPos[pair.second]
+
+                                if (hPlayerId != null && gPlayerId != null) {
+                                    IndividualMatches.insert {
+                                        it[this.matchId] = matchId
+                                        it[this.homePlayerId] = hPlayerId
+                                        it[this.guestPlayerId] = gPlayerId
+                                        it[this.orderNumber] = index + 1 // 1-től 16-ig
+                                        it[this.status] = "pending"
+                                    }
+                                }
+                            }
+                        }
+
+                        call.respond(HttpStatusCode.OK, mapOf("status" to "grid_generated"))
+                    } else {
+                        call.respond(HttpStatusCode.OK, mapOf("status" to "waiting_for_opponent"))
+                    }
+
+                } catch (e: Exception) {
+                    appLog.error("Hiba a sorrend mentésekor: ${e.message}", e)
+                    call.respond(HttpStatusCode.BadRequest, e.message ?: "Hiba történt")
                 }
             }
         }

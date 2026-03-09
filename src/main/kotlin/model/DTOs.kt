@@ -85,14 +85,9 @@ data class ParticipantStatusUpdateDTO(
 )
 
 @Serializable
-data class IndividualMatchDTO(
-    val id: Int,
-    val homePlayerId: Int,
-    val homePlayerName: String,
-    val guestPlayerId: Int,
-    val guestPlayerName: String,
-    val homeScore: Int,
-    val guestScore: Int
+data class LineupSubmitDTO(
+    val teamSide: String, // "HOME" vagy "GUEST"
+    val positions: Map<Int, Int> // Map, ahol a Kulcs: pozíció(1-4), Érték: userId
 )
 
 @Serializable
@@ -101,7 +96,22 @@ data class MatchParticipantDTO(
     val userId: Int,
     val playerName: String,
     val teamSide: String, // "HOME" vagy "GUEST"
-    val status: String    // "APPLIED" vagy "SELECTED"
+    val status: String, // "APPLIED" vagy "SELECTED"
+    val position: Int? = null
+)
+
+@Serializable
+data class IndividualMatchDTO(
+    val id: Int,
+    val homePlayerId: Int,
+    val homePlayerName: String,
+    val guestPlayerId: Int,
+    val guestPlayerName: String,
+    val homeScore: Int,
+    val guestScore: Int,
+    val setScores: String? = null,
+    val status: String? = "pending",
+    val orderNumber: Int = 0
 )
 
 @Serializable
