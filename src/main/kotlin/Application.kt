@@ -961,6 +961,37 @@ fun Application.module(db: Database) {
                     call.respond(HttpStatusCode.BadRequest, e.message ?: "Hiba történt")
                 }
             }
+
+            // --- EGYÉNI MECCS PONTOZÁSA ---
+            put("/matches/individual/{id}/score") {
+                val principal = call.principal<UserIdPrincipal>()
+                if (principal == null) return@put call.respond(HttpStatusCode.Unauthorized)
+
+                val individualMatchId = call.parameters["id"]?.toIntOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest, "Érvénytelen ID")
+                val request = call.receive<ScoreSubmitDTO>()
+
+                try {
+                    val rowsAffected = transaction(db) {
+                        IndividualMatches.update({ IndividualMatches.id eq individualMatchId }) {
+                            it[homeScore] = request.homeScore
+                            it[guestScore] = request.guestScore
+                            it[homeSetsWon] = request.homeScore // Kompatibilitás miatt
+                            it[guestSetsWon] = request.guestScore
+                            it[setScores] = request.setScores
+                            it[status] = request.status
+                        }
+                    }
+
+                    if (rowsAffected > 0) {
+                        call.respond(HttpStatusCode.OK, mapOf("status" to "score_updated"))
+                    } else {
+                        call.respond(HttpStatusCode.NotFound, "Meccs nem található")
+                    }
+                } catch (e: Exception) {
+                    appLog.error("Hiba a pontozásnál: ${e.message}", e)
+                    call.respond(HttpStatusCode.InternalServerError, "Szerver hiba")
+                }
+            }
         }
 
         // ---------------- WebSocket ----------------

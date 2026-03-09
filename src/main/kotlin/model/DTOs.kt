@@ -116,6 +116,14 @@ data class IndividualMatchDTO(
 )
 
 @Serializable
+data class ScoreSubmitDTO(
+    val homeScore: Int,       // Szettek száma (pl. 3)
+    val guestScore: Int,      // Szettek száma (pl. 1)
+    val setScores: String,    // "11-8, 9-11, 12-10, 11-5"
+    val status: String        // "in_progress" vagy "finished"
+)
+
+@Serializable
 data class FcmTokenRegistration(
     val email: String,
     val token: String
