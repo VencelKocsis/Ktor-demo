@@ -5,28 +5,49 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PingPong Admin Menedzsment</title>
     <script src="https://cdn.tailwindcss.com"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; }
         .tab-active { border-bottom: 4px solid #4F46E5; color: #4F46E5; font-weight: 700; }
+        /* ÚJ: Sötét módos tab inaktív stílus */
         .tab-inactive { border-bottom: 4px solid transparent; color: #6B7280; font-weight: 500; }
         .tab-inactive:hover { color: #374151; border-color: #D1D5DB; }
+        .dark .tab-inactive { color: #9CA3AF; }
+        .dark .tab-inactive:hover { color: #E5E7EB; border-color: #4B5563; }
+        .dark .tab-active { color: #818CF8; border-color: #818CF8; }
     </style>
 </head>
-<body class="bg-slate-50 min-h-screen text-slate-800">
 
-<header class="bg-white shadow-sm border-b border-slate-200 sticky top-0 z-40">
+<body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100 transition-colors duration-300 min-h-screen">
+
+<header class="bg-white dark:bg-slate-800 shadow-sm border-b border-slate-200 dark:border-slate-700 sticky top-0 z-40 transition-colors duration-300">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex justify-between items-center h-16">
             <div class="flex items-center gap-3">
                 <div class="bg-indigo-600 text-white p-2 rounded-lg">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
                 </div>
-                <h1 class="text-xl font-extrabold text-slate-900 tracking-tight">Klub Adminisztráció</h1>
+                <h1 class="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight">Klub Adminisztráció</h1>
             </div>
-            <div id="wsStatus" class="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-600 border border-slate-200 shadow-sm transition-colors">
-                <span class="w-2 h-2 rounded-full bg-slate-400" id="wsDot"></span>
-                <span id="wsText">WS Csatlakozás...</span>
+
+            <div class="flex items-center gap-4">
+                <button onclick="toggleDarkMode()" class="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700 transition-colors" title="Sötét/Világos mód">
+                    <svg id="themeIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+                    </svg>
+                </button>
+
+                <div id="wsStatus" class="inline-flex items-center gap-1.5 rounded-full bg-slate-100 dark:bg-slate-700 px-3 py-1 text-sm font-semibold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600 shadow-sm transition-colors">
+                    <span class="w-2 h-2 rounded-full bg-slate-400" id="wsDot"></span>
+                    <span id="wsText">WS Csatlakozás...</span>
+                </div>
             </div>
         </div>
     </div>
