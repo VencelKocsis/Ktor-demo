@@ -458,7 +458,9 @@ fun Application.module(db: Database) {
                             homeTeamId = homeTeamEntityId.value,
                             guestTeamId = guestTeamEntityId.value,
                             individualMatches = individualMatches,
-                            participants = participants
+                            participants = participants,
+                            homeTeamSigned = matchRow[Matches.homeTeamSigned],
+                            guestTeamSigned = matchRow[Matches.guestTeamSigned]
                         )
                     }
                 }
