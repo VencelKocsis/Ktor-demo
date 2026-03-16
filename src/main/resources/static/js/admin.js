@@ -1,5 +1,5 @@
 // --- KONSTANSOK ---
-const BACKEND_API_URL = "/users/available"; // Ha esetleg van külön játékos végpontod, cseréld le
+const BACKEND_API_URL = "/users"; // Mivel nincsenek külön playerek, a users végpontot hívjuk
 const CLUBS_API_URL = "/clubs";
 const TEAMS_API_URL = "/teams";
 const SEASONS_API_URL = "/seasons";
@@ -13,18 +13,14 @@ let playersData = [];
 let teamsDataCache = [];
 let clubsDataCache = [];
 
-// --- UI SEGÉDFÜGGVÉNYEK ---
-
 // --- SÖTÉT MÓD LOGIKA ---
 
 function updateThemeIcon(isDark) {
     const icon = document.getElementById('themeIcon');
     if (!icon) return;
     if (isDark) {
-        // Nap ikon (mert sötétben vagyunk, a világosra váltást ajánlja fel)
         icon.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>`;
     } else {
-        // Hold ikon (mert világosban vagyunk)
         icon.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>`;
     }
 }
@@ -36,7 +32,6 @@ function toggleDarkMode() {
     updateThemeIcon(isDark);
 }
 
-// Oldal betöltésekor ellenőrizzük, volt-e már elmentve beállítás
 if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
     document.documentElement.classList.add('dark');
     document.addEventListener('DOMContentLoaded', () => updateThemeIcon(true));
@@ -45,8 +40,7 @@ if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.match
     document.addEventListener('DOMContentLoaded', () => updateThemeIcon(false));
 }
 
-// És ezt is add hozzá a fájl legvégéhez:
-window.toggleDarkMode = toggleDarkMode;
+// --- UI SEGÉDFÜGGVÉNYEK ---
 
 function showStatus(message, isError = false) {
     const statusEl = document.getElementById('status');
@@ -97,8 +91,268 @@ function switchTab(tabId) {
     }
 }
 
-
 // --- KLUB FUNKCIÓK ---
+
+async function fetchClubs() {
+    try {
+        const response = await fetch(CLUBS_API_URL);
+        if (!response.ok) throw new Error("Hiba a klubok lekérésénél.");
+
+        clubsDataCache = await response.json();
+
+        const clubSelect = document.getElementById('teamClub');
+        if (clubSelect) {
+            clubSelect.innerHTML = '<option value="">Válassz klubot...</option>';
+            clubsDataCache.forEach(club => {
+                clubSelect.innerHTML += `<option value="${club.id}">${club.name}</option>`;
+            });
+        }
+
+        const container = document.getElementById('clubsContainer');
+        if (container) {
+            container.innerHTML = '';
+
+            if (clubsDataCache.length === 0) {
+                container.innerHTML = '<div class="col-span-full text-center py-4 text-slate-500 dark:text-slate-400">Még nincsenek klubok.</div>';
+                return;
+            }
+
+            clubsDataCache.forEach(club => {
+                container.innerHTML += `
+                    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm flex justify-between items-center transition-colors">
+                        <div>
+                            <h3 class="font-bold text-slate-800 dark:text-white">${club.name}</h3>
+                            <p class="text-xs text-slate-500 dark:text-slate-400">${club.address}</p>
+                        </div>
+                        <button onclick="openEditClub(${club.id})" class="text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 text-sm font-bold bg-emerald-50 dark:bg-emerald-900/30 px-3 py-1.5 rounded-md transition-colors">Módosít</button>
+                    </div>
+                `;
+            });
+        }
+
+    } catch (error) {
+        console.error("Klubok betöltése sikertelen:", error);
+    }
+}
+
+async function addClub(event) {
+    event.preventDefault();
+    const newClubData = {
+        name: document.getElementById('clubName').value.trim(),
+        address: document.getElementById('clubAddress').value.trim()
+    };
+    try {
+        const response = await fetch(CLUBS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newClubData)
+        });
+        if (!response.ok) throw new Error('Hiba a mentésnél');
+        document.getElementById('addClubForm').reset();
+        showStatus('Klub sikeresen létrehozva!');
+        fetchClubs();
+    } catch (error) {
+        showStatus(error.message, true);
+    }
+}
+
+function openEditClub(id) {
+    const club = clubsDataCache.find(c => c.id === id);
+    if (!club) return;
+    document.getElementById('editClubId').value = club.id;
+    document.getElementById('editClubName').value = club.name;
+    document.getElementById('editClubAddress').value = club.address;
+
+    const modal = document.getElementById('editClubModal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+
+function closeEditClubModal() {
+    const modal = document.getElementById('editClubModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+}
+
+async function saveClubEdit(event) {
+    event.preventDefault();
+    const id = document.getElementById('editClubId').value;
+    const updateData = {
+        name: document.getElementById('editClubName').value.trim(),
+        address: document.getElementById('editClubAddress').value.trim()
+    };
+    try {
+        const response = await fetch(`${CLUBS_API_URL}/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updateData)
+        });
+        if (!response.ok) throw new Error('Hiba a frissítésnél');
+        closeEditClubModal();
+        showStatus('Klub frissítve!');
+        fetchClubs();
+        fetchTeams();
+    } catch (error) {
+        showStatus(error.message, true);
+    }
+}
+
+// --- JÁTÉKOSOK (USERS) ---
+async function fetchPlayers() {
+    try {
+        const response = await fetch("/users");
+        if (!response.ok) throw new Error(`Hiba: ${response.status}`);
+        playersData = await response.json();
+
+        const captainSelect = document.getElementById('teamCaptain');
+        if (captainSelect) {
+            captainSelect.innerHTML = '<option value="">Kapitány kiválasztása...</option>';
+            playersData.forEach(player => {
+                captainSelect.innerHTML += `<option value="${player.userId}">${player.name || 'Névtelen'}</option>`;
+            });
+        }
+    } catch (error) {
+        console.error("Nem sikerült lekérni a játékosokat a kapitány listához:", error);
+    }
+}
+
+// --- CSAPAT FUNKCIÓK ---
+
+async function fetchTeams() {
+    const container = document.getElementById('teamsContainer');
+    if (!container) return;
+
+    container.innerHTML = '<div class="col-span-full text-center py-8 text-indigo-600 dark:text-indigo-400 font-bold animate-pulse">Csapatok betöltése...</div>';
+
+    try {
+        const response = await fetch(TEAMS_API_URL);
+        if (!response.ok) throw new Error(`Hiba: ${response.status}`);
+        teamsDataCache = await response.json();
+
+        container.innerHTML = '';
+        if (teamsDataCache.length === 0) {
+            container.innerHTML = '<div class="col-span-full text-center py-8 text-slate-500 dark:text-slate-400">Nincsenek regisztrált csapatok.</div>';
+            return;
+        }
+
+        teamsDataCache.forEach(team => {
+            container.innerHTML += `
+                <div class="bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:shadow-md transition-all relative">
+                    <button onclick="openEditTeam(${team.teamId})" class="absolute top-4 right-4 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 text-sm font-bold bg-indigo-100 dark:bg-indigo-900/30 px-3 py-1 rounded-md transition-colors">Módosít</button>
+                    <div class="flex justify-between items-start mb-4 pr-20">
+                        <div>
+                            <h3 class="text-xl font-extrabold text-slate-800 dark:text-white">${team.teamName}</h3>
+                            <p class="text-sm font-semibold text-indigo-600 dark:text-indigo-400">${team.clubName} • ${team.division || 'N/A'}</p>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 mb-4 text-center text-sm border-t border-b border-slate-200 dark:border-slate-700 py-3">
+                        <div><span class="block text-slate-500 dark:text-slate-400 text-xs uppercase font-bold">Győzelem</span><span class="font-bold text-emerald-600 dark:text-emerald-400">${team.wins}</span></div>
+                        <div class="border-l border-r border-slate-200 dark:border-slate-700"><span class="block text-slate-500 dark:text-slate-400 text-xs uppercase font-bold">Döntetlen</span><span class="font-bold text-amber-500 dark:text-amber-400">${team.draws}</span></div>
+                        <div><span class="block text-slate-500 dark:text-slate-400 text-xs uppercase font-bold">Vereség</span><span class="font-bold text-rose-600 dark:text-rose-400">${team.losses}</span></div>
+                    </div>
+                    <div>
+                        <h4 class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-2">Csapattagok (${team.members.length})</h4>
+                        <div class="flex flex-wrap gap-1.5">
+                            ${team.members.map(m => `<span class="inline-block bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-xs px-2 py-1 rounded-md shadow-sm ${m.isCaptain ? 'ring-1 ring-amber-400 dark:ring-amber-500 font-bold' : ''}">${m.isCaptain ? '⭐ ' : ''}${m.name}</span>`).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        if (typeof updateMatchTeamDropdowns === "function") {
+            updateMatchTeamDropdowns();
+        }
+
+    } catch (error) {
+        console.error(error);
+        container.innerHTML = `<div class="col-span-full text-center py-8 text-rose-500 dark:text-rose-400 font-bold">Hiba a betöltéskor: ${error.message}</div>`;
+    }
+}
+
+async function addTeam(event) {
+    event.preventDefault();
+    const clubIdStr = document.getElementById('teamClub').value;
+    const teamName = document.getElementById('teamName').value.trim();
+    const division = document.getElementById('teamDivision').value.trim();
+    const captainIdStr = document.getElementById('teamCaptain').value;
+
+    if (!clubIdStr || !captainIdStr) {
+        showStatus("Kérlek válassz ki egy klubot és egy kapitányt is!", true);
+        return;
+    }
+
+    const newTeamData = {
+        clubId: parseInt(clubIdStr, 10),
+        name: teamName,
+        captainUserId: parseInt(captainIdStr, 10)
+    };
+
+    if (division.length > 0) {
+        newTeamData.division = division;
+    }
+
+    try {
+        const response = await fetch(TEAMS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newTeamData)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || `Hiba: ${response.status}`);
+        }
+
+        document.getElementById('addTeamForm').reset();
+        showStatus('Csapat sikeresen létrehozva a kapitánnyal együtt!');
+        fetchTeams();
+        fetchPlayers();
+    } catch (error) {
+        showStatus(error.message, true);
+    }
+}
+
+function openEditTeam(id) {
+    const team = teamsDataCache.find(t => t.teamId === id);
+    if (!team) return;
+    document.getElementById('editTeamId').value = team.teamId;
+    document.getElementById('editTeamName').value = team.teamName;
+    document.getElementById('editTeamDivision').value = team.division || '';
+
+    const modal = document.getElementById('editTeamModal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+
+function closeEditTeamModal() {
+    const modal = document.getElementById('editTeamModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+}
+
+async function saveTeamEdit(event) {
+    event.preventDefault();
+    const id = document.getElementById('editTeamId').value;
+    const divisionVal = document.getElementById('editTeamDivision').value.trim();
+    const updateData = {
+        name: document.getElementById('editTeamName').value.trim(),
+        division: divisionVal.length > 0 ? divisionVal : null
+    };
+    try {
+        const response = await fetch(`${TEAMS_API_URL}/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updateData)
+        });
+        if (!response.ok) throw new Error('Hiba a frissítésnél');
+        closeEditTeamModal();
+        showStatus('Csapat frissítve!');
+        fetchTeams();
+    } catch (error) {
+        showStatus(error.message, true);
+    }
+}
 
 // --- MÉRKŐZÉS FUNKCIÓK ---
 
@@ -112,7 +366,6 @@ async function fetchSeasons() {
         if (seasonSelect) {
             seasonSelect.innerHTML = '<option value="">Szezon kiválasztása...</option>';
             seasons.forEach(s => {
-                // Az aktív szezont ki is jelölhetjük alapból
                 const selected = s.isActive ? 'selected' : '';
                 seasonSelect.innerHTML += `<option value="${s.id}" ${selected}>${s.name}</option>`;
             });
@@ -122,7 +375,6 @@ async function fetchSeasons() {
     }
 }
 
-// Ezt a függvényt be kell hívni a fetchTeams() VÉGÉN is, hogy a dropdownok mindig frissek legyenek!
 function updateMatchTeamDropdowns() {
     const homeSelect = document.getElementById('matchHomeTeam');
     const guestSelect = document.getElementById('matchGuestTeam');
@@ -154,16 +406,12 @@ async function fetchMatches() {
             return;
         }
 
-        // Rendezzük időpont vagy forduló szerint (legújabb legfelül)
         matches.sort((a, b) => b.id - a.id).forEach(match => {
-
-            // Státusz jelvény színezése
             let statusBadge = '';
             if (match.status === 'scheduled') statusBadge = '<span class="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-1 rounded">Kiírva</span>';
             else if (match.status === 'in_progress') statusBadge = '<span class="bg-amber-100 text-amber-800 text-xs font-bold px-2 py-1 rounded">Élő</span>';
             else statusBadge = '<span class="bg-emerald-100 text-emerald-800 text-xs font-bold px-2 py-1 rounded">Befejezve</span>';
 
-            // Dátum formázása olvashatóra
             const dateObj = new Date(match.date);
             const formattedDate = dateObj.toLocaleString('hu-HU', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit' });
 
@@ -214,7 +462,7 @@ async function addMatch(event) {
         roundNumber: parseInt(roundNumber, 10),
         homeTeamId: parseInt(homeTeamId, 10),
         guestTeamId: parseInt(guestTeamId, 10),
-        matchDate: matchDate, // "YYYY-MM-DDTHH:mm" formátum tökéletes a Kotlinnak
+        matchDate: matchDate,
         location: location
     };
 
@@ -232,272 +480,7 @@ async function addMatch(event) {
 
         document.getElementById('addMatchForm').reset();
         showStatus('Mérkőzés sikeresen kiírva!');
-        fetchMatches(); // Frissítjük a listát
-    } catch (error) {
-        showStatus(error.message, true);
-    }
-}
-
-async function fetchClubs() {
-    try {
-        const response = await fetch(CLUBS_API_URL);
-        if (!response.ok) throw new Error("Hiba a klubok lekérésénél.");
-
-        clubsDataCache = await response.json();
-
-        // 1. Legördülő lista frissítése az "Új Csapat" űrlaphoz
-        const clubSelect = document.getElementById('teamClub');
-        if (clubSelect) {
-            clubSelect.innerHTML = '<option value="">Válassz klubot...</option>';
-            clubsDataCache.forEach(club => {
-                clubSelect.innerHTML += `<option value="${club.id}">${club.name}</option>`;
-            });
-        }
-
-        // 2. Klub kártyák kirajzolása a jobb oldali listába
-        const container = document.getElementById('clubsContainer');
-        if (container) {
-            container.innerHTML = ''; // Kiürítjük a régit
-
-            if (clubsDataCache.length === 0) {
-                container.innerHTML = '<div class="col-span-full text-center py-4 text-slate-500 dark:text-slate-400">Még nincsenek klubok.</div>';
-                return;
-            }
-
-            clubsDataCache.forEach(club => {
-                container.innerHTML += `
-                    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm flex justify-between items-center transition-colors">
-                        <div>
-                            <h3 class="font-bold text-slate-800 dark:text-white">${club.name}</h3>
-                            <p class="text-xs text-slate-500 dark:text-slate-400">${club.address}</p>
-                        </div>
-                        <button onclick="openEditClub(${club.id})" class="text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 text-sm font-bold bg-emerald-50 dark:bg-emerald-900/30 px-3 py-1.5 rounded-md transition-colors">Módosít</button>
-                    </div>
-                `;
-            });
-        }
-
-    } catch (error) {
-        console.error("Klubok betöltése sikertelen:", error);
-    }
-}
-
-async function addClub(event) {
-    event.preventDefault();
-    const newClubData = {
-        name: document.getElementById('clubName').value.trim(),
-        address: document.getElementById('clubAddress').value.trim()
-    };
-    try {
-        const response = await fetch(CLUBS_API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newClubData)
-        });
-        if (!response.ok) throw new Error('Hiba a mentésnél');
-        document.getElementById('addClubForm').reset();
-        showStatus('Klub sikeresen létrehozva!');
-        fetchClubs();
-    } catch (error) {
-        showStatus(error.message, true);
-    }
-}
-
-// --- JÁTÉKOS LEKÉRDEZÉS  ---
-async function fetchPlayers() {
-    try {
-        const response = await fetch("/users");
-        if (!response.ok) throw new Error(`Hiba: ${response.status}`);
-        playersData = await response.json();
-
-        const captainSelect = document.getElementById('teamCaptain');
-        if (captainSelect) {
-            captainSelect.innerHTML = '<option value="">Kapitány kiválasztása...</option>';
-            playersData.forEach(player => {
-                captainSelect.innerHTML += `<option value="${player.userId}">${player.name || 'Névtelen'}</option>`;
-            });
-        }
-    } catch (error) {
-        console.error("Nem sikerült lekérni a játékosokat:", error);
-    }
-}
-
-function openEditTeam(id) {
-    const team = teamsDataCache.find(t => t.teamId === id);
-    if (!team) return;
-    document.getElementById('editTeamId').value = team.teamId;
-    document.getElementById('editTeamName').value = team.teamName;
-    document.getElementById('editTeamDivision').value = team.division || '';
-
-    const modal = document.getElementById('editTeamModal');
-    modal.classList.remove('hidden');
-    modal.classList.add('flex');
-}
-
-function closeEditTeamModal() {
-    const modal = document.getElementById('editTeamModal');
-    modal.classList.add('hidden');
-    modal.classList.remove('flex');
-}
-
-function openEditClub(id) {
-    const club = clubsDataCache.find(c => c.id === id);
-    if (!club) return;
-    document.getElementById('editClubId').value = club.id;
-    document.getElementById('editClubName').value = club.name;
-    document.getElementById('editClubAddress').value = club.address;
-
-    const modal = document.getElementById('editClubModal');
-    modal.classList.remove('hidden');
-    modal.classList.add('flex');
-}
-
-function closeEditClubModal() {
-    const modal = document.getElementById('editClubModal');
-    modal.classList.add('hidden');
-    modal.classList.remove('flex');
-}
-
-async function saveTeamEdit(event) {
-    event.preventDefault();
-    const id = document.getElementById('editTeamId').value;
-    const divisionVal = document.getElementById('editTeamDivision').value.trim();
-    const updateData = {
-        name: document.getElementById('editTeamName').value.trim(),
-        division: divisionVal.length > 0 ? divisionVal : null
-    };
-    try {
-        const response = await fetch(`${TEAMS_API_URL}/${id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(updateData)
-        });
-        if (!response.ok) throw new Error('Hiba a frissítésnél');
-        closeEditTeamModal();
-        showStatus('Csapat frissítve!');
-        fetchTeams();
-    } catch (error) {
-        showStatus(error.message, true);
-    }
-}
-
-async function saveClubEdit(event) {
-    event.preventDefault();
-    const id = document.getElementById('editClubId').value;
-    const updateData = {
-        name: document.getElementById('editClubName').value.trim(),
-        address: document.getElementById('editClubAddress').value.trim()
-    };
-    try {
-        const response = await fetch(`${CLUBS_API_URL}/${id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(updateData)
-        });
-        if (!response.ok) throw new Error('Hiba a frissítésnél');
-        closeEditClubModal();
-        showStatus('Klub frissítve!');
-        fetchClubs();
-        fetchTeams();
-    } catch (error) {
-        showStatus(error.message, true);
-    }
-}
-
-// --- CSAPAT FUNKCIÓK ---
-
-async function fetchTeams() {
-    const container = document.getElementById('teamsContainer');
-    if (!container) return;
-
-    // Betöltés alatti szöveg sötétítése is
-    container.innerHTML = '<div class="col-span-full text-center py-8 text-indigo-600 dark:text-indigo-400 font-bold animate-pulse">Csapatok betöltése...</div>';
-
-    try {
-        const response = await fetch(TEAMS_API_URL);
-        if (!response.ok) throw new Error(`Hiba: ${response.status}`);
-        teamsDataCache = await response.json();
-
-        container.innerHTML = '';
-        if (teamsDataCache.length === 0) {
-            container.innerHTML = '<div class="col-span-full text-center py-8 text-slate-500 dark:text-slate-400">Nincsenek regisztrált csapatok.</div>';
-            return;
-        }
-
-        teamsDataCache.forEach(team => {
-            container.innerHTML += `
-                <div class="bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:shadow-md transition-all relative">
-                    <button onclick="openEditTeam(${team.teamId})" class="absolute top-4 right-4 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 text-sm font-bold bg-indigo-100 dark:bg-indigo-900/30 px-3 py-1 rounded-md transition-colors">Módosít</button>
-                    <div class="flex justify-between items-start mb-4 pr-20">
-                        <div>
-                            <h3 class="text-xl font-extrabold text-slate-800 dark:text-white">${team.teamName}</h3>
-                            <p class="text-sm font-semibold text-indigo-600 dark:text-indigo-400">${team.clubName} • ${team.division || 'N/A'}</p>
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-3 gap-2 mb-4 text-center text-sm border-t border-b border-slate-200 dark:border-slate-700 py-3">
-                        <div><span class="block text-slate-500 dark:text-slate-400 text-xs uppercase font-bold">Győzelem</span><span class="font-bold text-emerald-600 dark:text-emerald-400">${team.wins}</span></div>
-                        <div class="border-l border-r border-slate-200 dark:border-slate-700"><span class="block text-slate-500 dark:text-slate-400 text-xs uppercase font-bold">Döntetlen</span><span class="font-bold text-amber-500 dark:text-amber-400">${team.draws}</span></div>
-                        <div><span class="block text-slate-500 dark:text-slate-400 text-xs uppercase font-bold">Vereség</span><span class="font-bold text-rose-600 dark:text-rose-400">${team.losses}</span></div>
-                    </div>
-                    <div>
-                        <h4 class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-2">Csapattagok (${team.members.length})</h4>
-                        <div class="flex flex-wrap gap-1.5">
-                            ${team.members.map(m => `<span class="inline-block bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-xs px-2 py-1 rounded-md shadow-sm ${m.isCaptain ? 'ring-1 ring-amber-400 dark:ring-amber-500 font-bold' : ''}">${m.isCaptain ? '⭐ ' : ''}${m.name}</span>`).join('')}
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-
-        // Frissítjük a Mérkőzések fül legördülő menüit, miután letöltöttük a csapatokat
-        if (typeof updateMatchTeamDropdowns === "function") {
-            updateMatchTeamDropdowns();
-        }
-
-    } catch (error) {
-        console.error(error);
-        container.innerHTML = `<div class="col-span-full text-center py-8 text-rose-500 dark:text-rose-400 font-bold">Hiba a betöltéskor: ${error.message}</div>`;
-    }
-}
-
-async function addTeam(event) {
-    event.preventDefault();
-    const clubIdStr = document.getElementById('teamClub').value;
-    const teamName = document.getElementById('teamName').value.trim();
-    const division = document.getElementById('teamDivision').value.trim();
-    const captainIdStr = document.getElementById('teamCaptain').value;
-
-    if (!clubIdStr || !captainIdStr) {
-        showStatus("Kérlek válassz ki egy klubot és egy kapitányt is!", true);
-        return;
-    }
-
-    const newTeamData = {
-        clubId: parseInt(clubIdStr, 10),
-        name: teamName,
-        captainUserId: parseInt(captainIdStr, 10)
-    };
-
-    if (division.length > 0) {
-        newTeamData.division = division;
-    }
-
-    try {
-        const response = await fetch(TEAMS_API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newTeamData)
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(errorText || `Hiba: ${response.status}`);
-        }
-
-        document.getElementById('addTeamForm').reset();
-        showStatus('Csapat sikeresen létrehozva a kapitánnyal együtt!');
-        fetchTeams();
-        fetchPlayers(); // Újratöltjük a kapitányokat, mert egy játékos bekerült egy csapatba
+        fetchMatches();
     } catch (error) {
         showStatus(error.message, true);
     }
@@ -533,10 +516,10 @@ window.onload = () => {
     fetchPlayers();
     fetchSeasons();
     fetchMatches();
-    switchTab('teamsTab'); // Induláskor a Csapatok fület mutatjuk, ha a Játékosok már nincsenek
+    switchTab('teamsTab');
 }
 
-// Hogy a HTML-ből hívhatók legyenek a függvények:
+window.toggleDarkMode = toggleDarkMode;
 window.registerFCMToken = registerFCMToken;
 
 window.fetchClubs = fetchClubs;
