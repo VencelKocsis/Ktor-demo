@@ -986,11 +986,31 @@ fun Application.module(db: Database) {
                         val gSigned = updatedMatch[Matches.guestTeamSigned]
                         var newStatus = updatedMatch[Matches.status]
 
-                        // Ha mindkét fél aláírta, LEZÁRJUK a meccset
+                        // Ha mindkét fél aláírta, LEZÁRJUK a meccset ÉS összesítjük a pontokat!
                         if (hSigned && gSigned) {
                             newStatus = "finished"
-                            Matches.update({ Matches.id eq matchId }) { it[status] = newStatus }
+
+                            // Összeszámoljuk az egyéni meccsek nyerteseit
+                            val indMatches = IndividualMatches.select { IndividualMatches.matchId eq matchId }
+                            var finalHomeScore = 0
+                            var finalGuestScore = 0
+
+                            indMatches.forEach { row ->
+                                val hSets = row[IndividualMatches.homeScore]
+                                val gSets = row[IndividualMatches.guestScore]
+                                if (hSets > gSets) finalHomeScore++
+                                else if (gSets > hSets) finalGuestScore++
+                            }
+
+                            // Frissítjük a fő meccset a végeredménnyel
+                            Matches.update({ Matches.id eq matchId }) {
+                                it[status] = newStatus
+                                it[homeTeamScore] = finalHomeScore
+                                it[guestTeamScore] = finalGuestScore
+                            }
                         }
+
+                        Triple(hSigned, gSigned, newStatus)
 
                         Triple(hSigned, gSigned, newStatus)
                     }
