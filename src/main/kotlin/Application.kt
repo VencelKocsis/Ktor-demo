@@ -430,12 +430,13 @@ fun Application.module(db: Database) {
                     Teams.insertAndGetId {
                         it[clubId] = request.clubId
                         it[name] = request.name
-                        it[division] = request.division
+                        it[division] = if (request.division.isNullOrBlank()) null else request.division
                     }.value
                 }
                 call.respond(HttpStatusCode.Created, mapOf("id" to newId, "status" to "created"))
             } catch (e: Exception) {
                 appLog.error("Hiba a csapat létrehozásakor: ${e.message}")
+                // Küldjük vissza a PONTS hibaüzenetet, hogy a kliens ki tudja írni!
                 call.respond(HttpStatusCode.BadRequest, "Hiba a mentésnél: ${e.message}")
             }
         }
@@ -542,6 +543,47 @@ fun Application.module(db: Database) {
             else call.respond(HttpStatusCode.NotFound, "User nem található")
         }
 
+        put("/teams/{id}") {
+            val teamId = call.parameters["id"]?.toIntOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest, "Érvénytelen csapat ID")
+            val updateData = call.receive<TeamUpdateDTO>()
+            val rowsAffected = transaction(db) {
+                Teams.update({ Teams.id eq teamId }) { it[name] = updateData.name }
+            }
+            if (rowsAffected > 0) call.respond(HttpStatusCode.OK, mapOf("status" to "updated")) else call.respond(HttpStatusCode.NotFound, "Csapat nem található")
+        }
+
+        // --- KLUB LÉTREHOZÁSA ---
+        post("/clubs") {
+            try {
+                val request = call.receive<ClubCreateDTO>()
+                val newId = transaction(db) {
+                    Clubs.insertAndGetId {
+                        it[name] = request.name
+                        it[address] = request.address
+                    }.value
+                }
+                call.respond(HttpStatusCode.Created, mapOf("id" to newId, "status" to "created"))
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, "Hiba a mentésnél: ${e.message}")
+            }
+        }
+
+        // --- KLUB MÓDOSÍTÁSA ---
+        put("/clubs/{id}") {
+            try {
+                val clubId = call.parameters["id"]?.toIntOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest)
+                val request = call.receive<ClubCreateDTO>()
+                transaction(db) {
+                    Clubs.update({ Clubs.id eq clubId }) {
+                        it[name] = request.name
+                        it[address] = request.address
+                    }
+                }
+                call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, "Hiba: ${e.message}")
+            }
+        }
 
         // ====================================================================
         // VÉDETT VÉGPONTOK (Csak Firebase tokennel)
@@ -592,15 +634,6 @@ fun Application.module(db: Database) {
                     } else null
                 }
                 if (updatedUser != null) call.respond(HttpStatusCode.OK, updatedUser) else call.respond(HttpStatusCode.NotFound, "Nincs ilyen")
-            }
-
-            put("/teams/{id}") {
-                val teamId = call.parameters["id"]?.toIntOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest, "Érvénytelen csapat ID")
-                val updateData = call.receive<TeamUpdateDTO>()
-                val rowsAffected = transaction(db) {
-                    Teams.update({ Teams.id eq teamId }) { it[name] = updateData.name }
-                }
-                if (rowsAffected > 0) call.respond(HttpStatusCode.OK, mapOf("status" to "updated")) else call.respond(HttpStatusCode.NotFound, "Csapat nem található")
             }
 
             get("/users/available") {

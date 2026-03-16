@@ -9,6 +9,18 @@ data class TeamCreateDTO(
     val division: String? = null
 )
 
+@Serializable
+data class TeamUpdateDTO(
+    val name: String,
+    val division: String? = null
+)
+
+@Serializable
+data class ClubCreateDTO(
+    val name: String,
+    val address: String
+)
+
 // --- SZEZONOK ---
 @Serializable
 data class SeasonDTO(
@@ -49,11 +61,6 @@ data class TeamWithMembersDTO(
     val losses: Int,
     val draws: Int,
     val points: Int
-)
-
-@Serializable
-data class TeamUpdateDTO(
-    val name: String
 )
 
 @Serializable
