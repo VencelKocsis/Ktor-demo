@@ -283,17 +283,18 @@ async function addTeam(event) {
     const clubIdStr = document.getElementById('teamClub').value;
     const teamName = document.getElementById('teamName').value.trim();
     const division = document.getElementById('teamDivision').value.trim();
+    const captainIdStr = document.getElementById('teamCaptain').value;
 
-    // 1. Validáció: Van-e kiválasztott klub?
-    if (!clubIdStr) {
-        showStatus("Kérlek válassz ki egy klubot!", true);
+    // Validáció
+    if (!clubIdStr || !captainIdStr) {
+        showStatus("Kérlek válassz ki egy klubot és egy kapitányt is!", true);
         return;
     }
 
-    // 2. Objektum építése
     const newTeamData = {
         clubId: parseInt(clubIdStr, 10),
-        name: teamName
+        name: teamName,
+        captainUserId: parseInt(captainIdStr, 10)
     };
 
     if (division.length > 0) {
@@ -307,14 +308,13 @@ async function addTeam(event) {
             body: JSON.stringify(newTeamData)
         });
 
-        // 3. Ha 400-as hiba van, próbáljuk meg kiolvasni a hiba okát a szervertől!
         if (!response.ok) {
             const errorText = await response.text();
             throw new Error(errorText || `Hiba: ${response.status}`);
         }
 
         document.getElementById('addTeamForm').reset();
-        showStatus('Csapat sikeresen létrehozva!');
+        showStatus('Csapat sikeresen létrehozva a kapitánnyal együtt!');
         fetchTeams();
     } catch (error) {
         showStatus(error.message, true);
@@ -338,6 +338,30 @@ async function registerFCMToken() {
     } catch (error) {
         fcmStatusEl.textContent = 'Hiba történt';
         fcmStatusEl.className = 'text-sm font-semibold text-rose-600';
+    }
+}
+
+async function fetchPlayers() {
+    try {
+        const response = await fetch(BACKEND_API_URL);
+        if (!response.ok) throw new Error(`Hiba: ${response.status}`);
+        playersData = await response.json();
+
+        // Kirajzoljuk a táblázatot
+        renderPlayers(playersData);
+
+        const captainSelect = document.getElementById('teamCaptain');
+        if (captainSelect) {
+            captainSelect.innerHTML = '<option value="">Kapitány kiválasztása...</option>';
+            // Csak az azonosító kell, meg a nevét és emailjét mutatjuk
+            playersData.forEach(player => {
+                captainSelect.innerHTML += `<option value="${player.id}">${player.name || 'Névtelen'} (${player.email})</option>`;
+            });
+        }
+
+    } catch (error) {
+        console.error(error);
+        showStatus(`Hiba a játékosok betöltésekor: ${error.message}`, true);
     }
 }
 
@@ -395,7 +419,7 @@ window.fetchClubs = fetchClubs;
 window.addClub = addClub;
 window.openEditClub = openEditClub;
 window.saveClubEdit = saveClubEdit;
-
+window.fetchPlayers = fetchPlayers
 window.openEditTeam = openEditTeam;
 window.saveTeamEdit = saveTeamEdit;
 window.fetchTeams = fetchTeams;

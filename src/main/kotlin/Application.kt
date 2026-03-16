@@ -422,21 +422,31 @@ fun Application.module(db: Database) {
             }
         }
 
-        // --- CSAPAT LÉTREHOZÁSA ---
+        // --- ÚJ CSAPAT LÉTREHOZÁSA KAPITÁNNYAL ---
         post("/teams") {
             try {
                 val request = call.receive<TeamCreateDTO>()
                 val newId = transaction(db) {
-                    Teams.insertAndGetId {
+                    // 1. Létrehozzuk magát a csapatot
+                    val tId = Teams.insertAndGetId {
                         it[clubId] = request.clubId
                         it[name] = request.name
                         it[division] = if (request.division.isNullOrBlank()) null else request.division
-                    }.value
+                    }
+
+                    // 2. Azonnal felvesszük az első tagot kapitányként!
+                    TeamMembers.insert {
+                        it[teamId] = tId
+                        it[userId] = request.captainUserId
+                        it[isCaptain] = true
+                        it[joinedAt] = LocalDate.now()
+                    }
+
+                    tId.value
                 }
-                call.respond(HttpStatusCode.Created, mapOf("id" to newId, "status" to "created"))
+                call.respond(HttpStatusCode.Created, mapOf("id" to newId.toString(), "status" to "created"))
             } catch (e: Exception) {
                 appLog.error("Hiba a csapat létrehozásakor: ${e.message}")
-                // Küldjük vissza a PONTS hibaüzenetet, hogy a kliens ki tudja írni!
                 call.respond(HttpStatusCode.BadRequest, "Hiba a mentésnél: ${e.message}")
             }
         }
@@ -562,7 +572,7 @@ fun Application.module(db: Database) {
                         it[address] = request.address
                     }.value
                 }
-                call.respond(HttpStatusCode.Created, mapOf("id" to newId, "status" to "created"))
+                call.respond(HttpStatusCode.Created, mapOf("id" to newId.toString(), "status" to "created"))
             } catch (e: Exception) {
                 call.respond(HttpStatusCode.BadRequest, "Hiba a mentésnél: ${e.message}")
             }
@@ -755,7 +765,7 @@ fun Application.module(db: Database) {
 
                         if (!isHomeCap && !isGuestCap) return@transaction null
 
-                        // 2. ÚJ LOGIKA: Mindkét csapat létszámának ellenőrzése
+                        // 2. Mindkét csapat létszámának ellenőrzése
                         val homeSelectedCount = MatchParticipants.select {
                             (MatchParticipants.matchId eq matchId) and
                                     (MatchParticipants.teamSide eq "HOME") and
@@ -995,7 +1005,7 @@ fun Application.module(db: Database) {
                     }
 
                     if (result > 0) {
-                        // --- ÚJ: WEBSOCKET BROADCAST ---
+                        // --- WEBSOCKET BROADCAST ---
                         // Szétküldjük az új állást minden csatlakozott kliensnek!
                         applicationScope.launch {
                             val event = WsEvent.IndividualScoreUpdated(

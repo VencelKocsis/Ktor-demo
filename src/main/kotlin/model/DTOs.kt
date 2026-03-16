@@ -6,7 +6,8 @@ import kotlinx.serialization.Serializable
 data class TeamCreateDTO(
     val clubId: Int,
     val name: String,
-    val division: String? = null
+    val division: String? = null,
+    val captainUserId: Int
 )
 
 @Serializable
