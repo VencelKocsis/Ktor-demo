@@ -2,6 +2,13 @@ package hu.bme.aut.android.demo.model
 
 import kotlinx.serialization.Serializable
 
+@Serializable
+data class TeamCreateDTO(
+    val clubId: Int,
+    val name: String,
+    val division: String? = null
+)
+
 // --- SZEZONOK ---
 @Serializable
 data class SeasonDTO(

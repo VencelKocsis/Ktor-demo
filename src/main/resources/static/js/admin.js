@@ -1,5 +1,6 @@
 // --- KONSTANSOK ---
 const BACKEND_API_URL = "/players";
+const CLUBS_API_URL = "/clubs";
 const TEAMS_API_URL = "/teams";
 const WEBSOCKET_URL = (window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host + "/ws/players";
 const FCM_REGISTRATION_URL = "/register_fcm_token";
@@ -125,6 +126,50 @@ async function fetchTeams() {
     } catch (error) {
         console.error(error);
         container.innerHTML = `<div class="col-span-full text-center py-8 text-red-500 font-bold">Hiba a betöltéskor: ${error.message}</div>`;
+    }
+}
+
+async function fetchClubs() {
+    try {
+        const response = await fetch(CLUBS_API_URL);
+        if (!response.ok) throw new Error("Hiba a klubok lekérésénél.");
+        const clubs = await response.json();
+
+        const clubSelect = document.getElementById('teamClub');
+        clubSelect.innerHTML = '<option value="">Válassz klubot...</option>';
+        clubs.forEach(club => {
+            clubSelect.innerHTML += `<option value="${club.id}">${club.name}</option>`;
+        });
+    } catch (error) {
+        console.error("Klubok betöltése sikertelen:", error);
+    }
+}
+
+async function addTeam(event) {
+    event.preventDefault();
+    const clubId = document.getElementById('teamClub').value;
+    const teamName = document.getElementById('teamName').value.trim();
+    const division = document.getElementById('teamDivision').value.trim();
+
+    const newTeamData = {
+        clubId: parseInt(clubId, 10),
+        name: teamName,
+        division: division || null
+    };
+
+    try {
+        const response = await fetch(TEAMS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newTeamData)
+        });
+        if (!response.ok) throw new Error('Hiba a csapat mentésénél');
+
+        document.getElementById('addTeamForm').reset();
+        showStatus('Csapat sikeresen létrehozva!');
+        fetchTeams(); // Frissítjük a kártyákat, hogy látszódjon az új csapat!
+    } catch (error) {
+        showStatus(error.message, true);
     }
 }
 
@@ -313,6 +358,7 @@ function setupWebSocket() {
 // --- INIT ---
 window.onload = () => {
     fetchPlayers();
+    fetchClubs();
     setupWebSocket();
     // Első fül aktívvá tétele
     switchTab('playersTab');
@@ -323,6 +369,7 @@ window.handleEdit = handleEdit;
 window.deletePlayer = deletePlayer;
 window.registerFCMToken = registerFCMToken;
 window.addPlayer = addPlayer;
+window.addTeam = addTeam
 window.closeEditModal = closeEditModal;
 window.saveEdit = saveEdit;
 window.fetchPlayers = fetchPlayers;

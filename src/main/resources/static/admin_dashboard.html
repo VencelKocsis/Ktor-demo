@@ -104,21 +104,53 @@
     </div>
 
     <div id="teamsTab" class="tab-content hidden">
-        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div class="p-6 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
-                <div>
-                    <h2 class="text-lg font-bold text-slate-800">Bajnokságban Résztvevő Csapatok</h2>
-                    <p class="text-sm text-slate-500">A rendszerben lévő klubok és csapataik áttekintése.</p>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+            <div class="lg:col-span-1">
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 sticky top-24">
+                    <h2 class="text-lg font-bold text-slate-800 mb-4">Új Csapat Létrehozása</h2>
+                    <form id="addTeamForm" onsubmit="addTeam(event)" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-semibold text-slate-700 mb-1">Klub*</label>
+                            <select id="teamClub" required class="w-full px-4 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                                <option value="">Klubok betöltése...</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-slate-700 mb-1">Csapat Név*</label>
+                            <input type="text" id="teamName" required placeholder="pl. BEAC III." class="w-full px-4 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-slate-700 mb-1">Divízió / Osztály</label>
+                            <input type="text" id="teamDivision" placeholder="pl. Budapest I." class="w-full px-4 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                        </div>
+                        <button type="submit" class="w-full mt-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-lg shadow-sm transition-all transform active:scale-95 flex justify-center items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                            Csapat Mentése
+                        </button>
+                    </form>
                 </div>
-                <button onclick="fetchTeams()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-sm text-sm">
-                    Adatok Betöltése
-                </button>
             </div>
-            <div class="p-6">
-                <div id="teamsContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <div class="text-center text-slate-500 col-span-full py-8">Kattints az "Adatok Betöltése" gombra.</div>
+
+            <div class="lg:col-span-2">
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div class="p-6 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
+                        <div>
+                            <h2 class="text-lg font-bold text-slate-800">Bajnokságban Résztvevő Csapatok</h2>
+                            <p class="text-sm text-slate-500">A rendszerben lévő klubok és csapataik áttekintése.</p>
+                        </div>
+                        <button onclick="fetchTeams()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-sm text-sm">
+                            Adatok Frissítése
+                        </button>
+                    </div>
+                    <div class="p-6 bg-slate-50">
+                        <div id="teamsContainer" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div class="text-center text-slate-500 col-span-full py-8">Kattints az "Adatok Frissítése" gombra.</div>
+                        </div>
+                    </div>
                 </div>
             </div>
+
         </div>
     </div>
 

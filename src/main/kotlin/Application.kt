@@ -403,6 +403,43 @@ fun Application.module(db: Database) {
             }
         }
 
+        // --- KLUBOK LEKÉRDEZÉSE ---
+        get("/clubs") {
+            try {
+                val clubs = transaction(db) {
+                    Clubs.selectAll().map {
+                        ClubDTO(
+                            id = it[Clubs.id].value,
+                            name = it[Clubs.name],
+                            address = it[Clubs.address]
+                        )
+                    }
+                }
+                call.respond(clubs)
+            } catch (e: Exception) {
+                appLog.error("Hiba a /clubs lekérdezésekor", e)
+                call.respond(HttpStatusCode.InternalServerError, "Adatbázis hiba")
+            }
+        }
+
+        // --- CSAPAT LÉTREHOZÁSA ---
+        post("/teams") {
+            try {
+                val request = call.receive<TeamCreateDTO>()
+                val newId = transaction(db) {
+                    Teams.insertAndGetId {
+                        it[clubId] = request.clubId
+                        it[name] = request.name
+                        it[division] = request.division
+                    }.value
+                }
+                call.respond(HttpStatusCode.Created, mapOf("id" to newId, "status" to "created"))
+            } catch (e: Exception) {
+                appLog.error("Hiba a csapat létrehozásakor: ${e.message}")
+                call.respond(HttpStatusCode.BadRequest, "Hiba a mentésnél: ${e.message}")
+            }
+        }
+
         get("/matches") {
             val round = call.request.queryParameters["round"]?.toIntOrNull()
             try {
