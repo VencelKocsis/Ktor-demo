@@ -1,22 +1,64 @@
-// --- KONSTANS ---
+// --- KONSTANSOK ---
 const BACKEND_API_URL = "/players";
-const WEBSOCKET_URL =
-    (window.location.protocol === "https:" ? "wss://" : "ws://") +
-    window.location.host + "/ws/players";
-
-// --- FCM Konstansok és Függvények (ÚJ) ---
+const TEAMS_API_URL = "/teams";
+const WEBSOCKET_URL = (window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host + "/ws/players";
 const FCM_REGISTRATION_URL = "/register_fcm_token";
-// FIX: Placeholder token a teszteléshez.
 const PLACEHOLDER_FCM_TOKEN = 'WEB_TEST_TOKEN_' + crypto.randomUUID();
 
-/**
- * FIGYELEM: A CANVAS KÖRNYEZETBEN TILTOTT AZ alert() ÉS confirm().
- * Ezt a nagyon egyszerű, de nem blokkoló modalt használjuk a deletePlayer funkcióhoz.
- * Éles környezetben ezt a funkciót egy valódi, DOM alapú modallal kell helyettesíteni!
- */
+let ws;
+let playersData = [];
+let editingPlayer = null;
+
+// --- UI SEGÉDFÜGGVÉNYEK ---
+
+function showStatus(message, isError = false) {
+    const statusEl = document.getElementById('status');
+    statusEl.textContent = message;
+    statusEl.className = `block w-full p-4 mb-6 rounded-lg font-bold text-sm text-center transition-all duration-300 ${isError ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`;
+    statusEl.classList.remove('hidden');
+
+    // 5 mp múlva eltűnik
+    setTimeout(() => {
+        statusEl.classList.add('hidden');
+    }, 5000);
+}
+
+function updateWsBadge(isConnected) {
+    const wsStatus = document.getElementById('wsStatus');
+    const wsDot = document.getElementById('wsDot');
+    const wsText = document.getElementById('wsText');
+
+    if (isConnected) {
+        wsStatus.className = "inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-sm font-semibold text-emerald-700 shadow-sm";
+        wsDot.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+        wsText.textContent = "WS Aktív";
+    } else {
+        wsStatus.className = "inline-flex items-center gap-1.5 rounded-full bg-red-50 border border-red-200 px-3 py-1 text-sm font-semibold text-red-700 shadow-sm";
+        wsDot.className = "w-2 h-2 rounded-full bg-red-500";
+        wsText.textContent = "WS Bontva";
+    }
+}
+
+// Fülek (Tabs) Váltása
+function switchTab(tabId) {
+    // Elrejtünk minden tartalmat
+    document.querySelectorAll('.tab-content').forEach(el => {
+        el.classList.remove('block');
+        el.classList.add('hidden');
+    });
+
+    // Minden gomb inaktív stílus
+    document.querySelectorAll('nav button').forEach(btn => {
+        btn.className = "tab-inactive pb-4 px-1 text-base transition-colors duration-200";
+    });
+
+    // Aktiváljuk a kiválasztottat
+    document.getElementById(tabId).classList.remove('hidden');
+    document.getElementById(tabId).classList.add('block');
+    document.getElementById(`btn-${tabId}`).className = "tab-active pb-4 px-1 text-base transition-colors duration-200";
+}
+
 function showNonBlockingWarning(message, callback) {
-    // A böngésző natív confirm() helyett itt kellene lennie egy aszinkron DOM modalnak.
-    // A teszteléshez a hagyományos confirm()-ot használjuk, de a kód ASZINKRON, mintha DOM modal lenne.
     if (window.confirm(message)) {
         callback(true);
     } else {
@@ -24,15 +66,72 @@ function showNonBlockingWarning(message, callback) {
     }
 }
 
-/**
- * Regisztrálja a placeholder FCM tokent a Ktor szerveren (ezt fogja értesíteni a POST /players).
- */
+// --- HÁLÓZATI FUNKCIÓK ---
+
+async function fetchPlayers() {
+    try {
+        const response = await fetch(BACKEND_API_URL);
+        if (!response.ok) throw new Error(`Hiba: ${response.status}`);
+        playersData = await response.json();
+        renderPlayers(playersData);
+        showStatus(`Sikeresen betöltve ${playersData.length} játékos.`);
+    } catch (error) {
+        console.error(error);
+        showStatus(`Hiba a játékosok betöltésekor: ${error.message}`, true);
+    }
+}
+
+async function fetchTeams() {
+    const container = document.getElementById('teamsContainer');
+    container.innerHTML = '<div class="col-span-full text-center py-8 text-indigo-600 font-bold animate-pulse">Csapatok betöltése...</div>';
+
+    try {
+        const response = await fetch(TEAMS_API_URL);
+        if (!response.ok) throw new Error(`Hiba: ${response.status}`);
+        const teamsData = await response.json();
+
+        container.innerHTML = '';
+        if (teamsData.length === 0) {
+            container.innerHTML = '<div class="col-span-full text-center py-8 text-slate-500">Nincsenek regisztrált csapatok.</div>';
+            return;
+        }
+
+        teamsData.forEach(team => {
+            const card = document.createElement('div');
+            card.className = "bg-slate-50 rounded-xl border border-slate-200 p-5 hover:shadow-md transition-shadow";
+            card.innerHTML = `
+                <div class="flex justify-between items-start mb-4">
+                    <div>
+                        <h3 class="text-xl font-extrabold text-slate-800">${team.teamName}</h3>
+                        <p class="text-sm font-semibold text-indigo-600">${team.clubName} • ${team.division || 'N/A'}</p>
+                    </div>
+                    <span class="bg-indigo-100 text-indigo-800 text-xs font-bold px-2.5 py-1 rounded-full">${team.points} Pont</span>
+                </div>
+                <div class="grid grid-cols-3 gap-2 mb-4 text-center text-sm border-t border-b border-slate-200 py-3">
+                    <div><span class="block text-slate-500 text-xs uppercase font-bold">Győzelem</span><span class="font-bold text-emerald-600">${team.wins}</span></div>
+                    <div class="border-l border-r border-slate-200"><span class="block text-slate-500 text-xs uppercase font-bold">Döntetlen</span><span class="font-bold text-amber-500">${team.draws}</span></div>
+                    <div><span class="block text-slate-500 text-xs uppercase font-bold">Vereség</span><span class="font-bold text-rose-600">${team.losses}</span></div>
+                </div>
+                <div>
+                    <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">Csapattagok (${team.members.length})</h4>
+                    <div class="flex flex-wrap gap-1.5">
+                        ${team.members.map(m => `<span class="inline-block bg-white border border-slate-200 text-slate-700 text-xs px-2 py-1 rounded-md shadow-sm ${m.isCaptain ? 'ring-1 ring-amber-400 font-bold' : ''}">${m.isCaptain ? '⭐ ' : ''}${m.name}</span>`).join('')}
+                    </div>
+                </div>
+            `;
+            container.appendChild(card);
+        });
+
+    } catch (error) {
+        console.error(error);
+        container.innerHTML = `<div class="col-span-full text-center py-8 text-red-500 font-bold">Hiba a betöltéskor: ${error.message}</div>`;
+    }
+}
+
 async function registerFCMToken() {
     const fcmStatusEl = document.getElementById('fcmStatus');
-    if (!fcmStatusEl) return;
-
-    fcmStatusEl.textContent = 'Regisztráció...';
-    fcmStatusEl.className = 'inline-flex items-center rounded-full bg-yellow-100 px-3 py-0.5 text-sm font-medium text-yellow-800';
+    fcmStatusEl.textContent = 'Küldés...';
+    fcmStatusEl.className = 'text-sm font-semibold text-amber-500';
 
     try {
         const response = await fetch(FCM_REGISTRATION_URL, {
@@ -40,404 +139,186 @@ async function registerFCMToken() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ fcm_token: PLACEHOLDER_FCM_TOKEN })
         });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(`Szerver hiba: ${response.status}. Válasz: ${data.status || 'ismeretlen hiba'}`);
-        }
-
-        fcmStatusEl.textContent = `Regisztrált: ${data.status}`;
-        fcmStatusEl.className = 'inline-flex items-center rounded-full bg-green-100 px-3 py-0.5 text-sm font-medium text-green-800';
-
-        console.log("FCM Token Registration successful:", data.status);
-
+        if (!response.ok) throw new Error('Regisztrációs hiba');
+        fcmStatusEl.textContent = 'Sikeres Teszt (Mock Token)';
+        fcmStatusEl.className = 'text-sm font-semibold text-emerald-600';
     } catch (error) {
-        console.error("FCM regisztrációs hiba:", error);
-        fcmStatusEl.textContent = `Hiba: ${error.message}`;
-        fcmStatusEl.className = 'inline-flex items-center rounded-full bg-red-100 px-3 py-0.5 text-sm font-medium text-red-800';
+        fcmStatusEl.textContent = 'Hiba történt';
+        fcmStatusEl.className = 'text-sm font-semibold text-rose-600';
     }
 }
 
-// Globális WebSocket objektum a kapcsolat kezeléséhez
-let ws;
-// Globális lista az adatok tárolására, amit a WS események frissítenek
-let playersData = [];
-let editingPlayer = null;
+// --- CRUD FUNKCIÓK ---
 
-/**
- * Inicializálás: Betölti a játékoslistát és elindítja a WebSocket kapcsolatot.
- */
-async function fetchPlayers() {
-    const statusEl = document.getElementById('status');
-    const playerTableBodyEl = document.getElementById('playerTableBody');
-
-    if (!statusEl || !playerTableBodyEl) {
-        console.error("DOM elemek hiányoznak, leállítom a betöltést.");
-        return;
-    }
-
-    statusEl.textContent = 'Betöltés...';
-    statusEl.className = 'text-center text-blue-600 my-4';
-
-    try {
-        const response = await fetch(BACKEND_API_URL);
-
-        if (!response.ok) {
-            throw new Error(`HTTP hiba: ${response.status} (${response.statusText})`);
-        }
-
-        playersData = await response.json(); // Frissítjük a globális listát
-        renderPlayers(playersData); // Megjelenítjük
-        statusEl.textContent = `Sikeresen betöltve: ${playersData.length} játékos.`;
-        statusEl.className = 'text-center text-green-600 my-4';
-
-    } catch (error) {
-        console.error("Hiba az adatok lekérdezésekor:", error);
-        statusEl.textContent = `Hiba a szerverrel való kommunikáció során: ${error.message}. Ellenőrizze, hogy a Ktor szerver fut-e.`;
-        statusEl.className = 'text-center text-red-600 my-4 font-bold';
-    }
-}
-
-// ----------------------------------------------------------------------
-// WebSocket és eseménykezelés
-// ----------------------------------------------------------------------
-
-/**
- * Esemény kezelése (frissítés, törlés, hozzáadás) a WS-ről érkező üzenet alapján.
- */
-function handleEvent(eventData) {
-    console.log("WS Event received:", eventData.type, eventData);
-
-    switch (eventData.type) {
-        case 'PlayerAdded':
-            // Ellenőrizzük, hogy az ID már létezik-e (elkerüljük a duplikációt)
-            if (!playersData.find(p => p.id === eventData.player.id)) {
-                playersData = [...playersData, eventData.player];
-            }
-            // Mivel a Ktor mindig broadcastol, még a saját POST kérésünkre is,
-            // a listát frissítjük a WS alapján.
-            break;
-
-        case 'PlayerDeleted':
-            // Kiszűrjük a törölt elemet az ID alapján
-            playersData = playersData.filter(p => p.id !== eventData.id);
-            // Kiírjuk a törlés tényét
-            document.getElementById('status').textContent = `Játékos ${eventData.id} törölve a WS-en keresztül.`;
-            document.getElementById('status').className = 'text-center text-orange-600 my-4';
-            break;
-
-        case 'PlayerUpdated':
-            const updatedPlayer = eventData.player;
-            // Megkeressük a régi játékost a listában és lecseréljük
-            playersData = playersData.map(p =>
-                p.id === updatedPlayer.id ? updatedPlayer : p
-            );
-            document.getElementById('status').textContent = `Játékos ${updatedPlayer.id} frissítve a WS-en keresztül.`;
-            document.getElementById('status').className = 'text-center text-orange-600 my-4';
-            break;
-
-        default:
-            console.warn("Ismeretlen WS esemény típus:", eventData.type);
-    }
-
-    // Minden frissítés után újra rendereljük a táblázatot
-    renderPlayers(playersData);
-}
-
-/**
- * Létrehozza és kezeli a WebSocket kapcsolatot
- */
-function setupWebSocket() {
-    if (ws) {
-        ws.close();
-    }
-    ws = new WebSocket(WEBSOCKET_URL);
-
-    ws.onopen = () => {
-        console.log("WebSocket kapcsolat létrejött.");
-        document.getElementById('wsStatus').textContent = 'Csatlakozva';
-        document.getElementById('wsStatus').className = 'inline-flex items-center rounded-full bg-green-100 px-3 py-0.5 text-sm font-medium text-green-800';
-
-        wsPingInterval = setInterval(() => {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                // Küldhetünk egy egyszerű JSON pinget, ha a Ktor beállítása igényli,
-                // de a Ktor/Netty beépített Ping/Pong mechanizmusa a legjobb.
-                // Maradjunk a kért JSON küldésnél, ha az a biztos.
-                ws.send(JSON.stringify({ type: "ping" }));
-            }
-        }, 30000); // 30 másodpercenként
-    };
-
-    ws.onmessage = (event) => {
-        try {
-            const eventData = JSON.parse(event.data);
-            handleEvent(eventData);
-        } catch (e) {
-            console.error("Hiba a WS üzenet dekódolásakor:", e);
-        }
-    };
-
-    ws.onclose = () => {
-        console.warn("WebSocket kapcsolat megszakadt. Újracsatlakozás 5 másodperc múlva...");
-        document.getElementById('wsStatus').textContent = 'Kapcsolat megszakadt. Újracsatlakozás...';
-        document.getElementById('wsStatus').className = 'inline-flex items-center rounded-full bg-red-100 px-3 py-0.5 text-sm font-medium text-red-800';
-        setTimeout(setupWebSocket, 5000); // 5 másodperc után próbálja újra
-    };
-
-    ws.onerror = (error) => {
-        console.error("WebSocket hiba:", error);
-        ws.close();
-    };
-}
-
-// ----------------------------------------------------------------------
-// CRUD Műveletek
-// ----------------------------------------------------------------------
-
-/**
- * Játékos hozzáadása POST kéréssel.
- */
 async function addPlayer(event) {
     event.preventDefault();
-
-    const form = document.getElementById('addPlayerForm');
-    const statusEl = document.getElementById('status');
-
     const nameInput = document.getElementById('playerName').value.trim();
     const ageInput = document.getElementById('playerAge').value.trim();
     const emailInput = document.getElementById('playerEmail').value.trim();
 
-    if (nameInput === "") {
-        statusEl.textContent = "Kérem adja meg a játékos nevét!";
-        statusEl.className = 'text-center text-red-500 my-4';
-        return;
-    }
-
-    const age = ageInput === "" ? null : parseInt(ageInput, 10);
-
     const newPlayerDTO = {
         name: nameInput,
-        age: age,
+        age: ageInput === "" ? null : parseInt(ageInput, 10),
         email: emailInput
     };
-
-    statusEl.textContent = 'Játékos hozzáadása...';
-    statusEl.className = 'text-center text-blue-600 my-4';
 
     try {
         const response = await fetch(BACKEND_API_URL, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(newPlayerDTO)
         });
+        if (!response.ok) throw new Error('Hiba a mentésnél');
 
-        if (!response.ok) {
-            const errorBody = await response.text();
-            throw new Error(`HTTP hiba: ${response.status} (${response.statusText}). Válasz: ${errorBody}`);
-        }
-
-        // A POST után kapott válasz is tartalmazza az új játékost, DE
-        // mivel a Ktor WS-t küld, hagyjuk a WS-t frissíteni a playersData-t.
-        // Itt csak a siker üzenetet jelezzük.
-
-        statusEl.textContent = `Játékos "${nameInput}" sikeresen hozzáadva. (WS frissíti a listát)`;
-        statusEl.className = 'text-center text-green-600 my-4 font-bold';
-
-        form.reset();
-
+        document.getElementById('addPlayerForm').reset();
+        showStatus('Játékos sikeresen hozzáadva!');
     } catch (error) {
-        console.error("Hiba a játékos hozzáadása során:", error);
-        statusEl.textContent = `Hiba a játékos hozzáadása során: ${error.message}`;
-        statusEl.className = 'text-center text-red-600 my-4 font-bold';
+        showStatus(error.message, true);
     }
 }
 
-/**
- * Játékos törlése DELETE kéréssel. (FRISSÍTVE: confirm() helyett showNonBlockingWarning)
- */
-async function deletePlayer(id) {
-    const playerName = playersData.find(p => p.id === id)?.name || id;
-
-    // FIX: showNonBlockingWarning használata (ld. fent)
-    showNonBlockingWarning(`Biztosan törölni szeretné a(z) "${playerName}" játékost (ID: ${id})?`, async (confirmed) => {
-        if (!confirmed) {
-            return;
-        }
-
-        const statusEl = document.getElementById('status');
-        statusEl.textContent = `Játékos ${id} törlése...`;
-        statusEl.className = 'text-center text-blue-600 my-4';
-
+function deletePlayer(id) {
+    showNonBlockingWarning(`Biztosan törölni szeretné ezt a játékost?`, async (confirmed) => {
+        if (!confirmed) return;
         try {
-            // Törlés végpont hívása
-            const response = await fetch(`${BACKEND_API_URL}/${id}`, {
-                method: 'DELETE',
-            });
-
-            if (!response.ok) {
-                const errorBody = await response.text();
-                throw new Error(`HTTP hiba: ${response.status} (${response.statusText}). Válasz: ${errorBody}`);
-            }
-
-            // A Ktor küld egy WS eseményt PlayerDeleted-et, ami frissíti a listát.
-            statusEl.textContent = `Játékos ${id} sikeresen törlésre került. (WS frissíti a listát)`;
-            statusEl.className = 'text-center text-green-600 my-4 font-bold';
-
+            const response = await fetch(`${BACKEND_API_URL}/${id}`, { method: 'DELETE' });
+            if (!response.ok) throw new Error('Hiba a törlésnél');
+            showStatus('Játékos sikeresen törölve!');
         } catch (error) {
-            console.error("Hiba a játékos törlése során:", error);
-            statusEl.textContent = `Hiba a törlés során: ${error.message}`;
-            statusEl.className = 'text-center text-red-600 my-4 font-bold';
+            showStatus(error.message, true);
         }
     });
 }
 
-/**
- * Megnyitja a szerkesztő modalt és feltölti az űrlapot a játékos adataival.
- */
 function handleEdit(player) {
-    editingPlayer = player; // Mentjük az aktuális játékos adatait
+    editingPlayer = player;
     document.getElementById('editPlayerId').value = player.id;
     document.getElementById('editPlayerName').value = player.name;
-    document.getElementById('editPlayerAge').value = player.age != null ? player.age : '';
-    document.getElementById('editPlayerEmail').value = player.email;
+    document.getElementById('editPlayerAge').value = player.age || '';
+    document.getElementById('editPlayerEmail').value = player.email || '';
 
-    // Megjelenítjük a modalt
     const modal = document.getElementById('editModal');
     modal.classList.remove('hidden');
-    modal.classList.add('flex');
+    // Kis delay az animációhoz
+    setTimeout(() => {
+        modal.classList.remove('opacity-0');
+        document.getElementById('editModalContent').classList.remove('scale-95');
+    }, 10);
 }
 
-/**
- * Bezárja a szerkesztő modalt.
- */
 function closeEditModal() {
-    editingPlayer = null; // Töröljük a szerkesztett játékos állapotát
+    editingPlayer = null;
     const modal = document.getElementById('editModal');
-    modal.classList.add('hidden');
-    modal.classList.remove('flex');
-    document.getElementById('status').textContent = ''; // Töröljük az esetleges hibákat
+    modal.classList.add('opacity-0');
+    document.getElementById('editModalContent').classList.add('scale-95');
+
+    setTimeout(() => {
+        modal.classList.add('hidden');
+    }, 300);
 }
 
-/**
- * Elküldi a szerkesztett adatokat a szerverre (HTTP PUT).
- */
 async function saveEdit(event) {
     event.preventDefault();
-
-    if (!editingPlayer) return; // Védelmi mechanizmus: ha nincs játékos, kilép
-
-    const statusEl = document.getElementById('status');
-    const nameInput = document.getElementById('editPlayerName').value.trim();
-    const ageInput = document.getElementById('editPlayerAge').value.trim();
-    const emailInput = document.getElementById('editPlayerEmail').value.trim();
-    const playerId = editingPlayer.id; // ID kinyerése a tárolt objektumból
-
-    if (nameInput === "" || emailInput === "") {
-        statusEl.textContent = "A név és az E-mail nem lehet üres a szerkesztés során!";
-        statusEl.className = 'text-center text-red-500 my-4';
-        return;
-    }
-
-    const age = ageInput === "" ? null : parseInt(ageInput, 10);
+    if (!editingPlayer) return;
 
     const updatedPlayerDTO = {
-        name: nameInput,
-        age: age,
-        email: emailInput
+        name: document.getElementById('editPlayerName').value.trim(),
+        age: document.getElementById('editPlayerAge').value.trim() ? parseInt(document.getElementById('editPlayerAge').value, 10) : null,
+        email: document.getElementById('editPlayerEmail').value.trim()
     };
 
-    const putUrl = `${BACKEND_API_URL}/${playerId}`;
-
-    statusEl.textContent = `Játékos ${playerId} frissítése...`;
-    statusEl.className = 'text-center text-blue-600 my-4';
-
     try {
-        const response = await fetch(putUrl, {
+        const response = await fetch(`${BACKEND_API_URL}/${editingPlayer.id}`, {
             method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(updatedPlayerDTO)
         });
+        if (!response.ok) throw new Error('Hiba a frissítésnél');
 
-        if (!response.ok) {
-            const errorBody = await response.text();
-            throw new Error(`HTTP hiba: ${response.status} (${response.statusText}). Válasz: ${errorBody}`);
-        }
-
-        closeEditModal(); // Bezárjuk a modalt
-        // A WS esemény (PlayerUpdated) fogja frissíteni a listát!
-        statusEl.textContent = `Játékos ${playerId} sikeresen frissítve. (WS frissíti a listát)`;
-        statusEl.className = 'text-center text-green-600 my-4 font-bold';
-
+        closeEditModal();
+        showStatus('Adatok sikeresen frissítve!');
     } catch (error) {
-        console.error("Hiba a játékos frissítése során:", error);
-        statusEl.textContent = `Hiba a frissítés során: ${error.message}`;
-        statusEl.className = 'text-center text-red-600 my-4 font-bold';
+        showStatus(error.message, true);
     }
 }
 
-/**
- * Megjeleníti a játékosadatokat a táblázatban a globális playersData lista alapján.
- * @param {Array<Object>} players - A játékosokat tartalmazó tömb.
- */
 function renderPlayers(players) {
-    const playerTableBodyEl = document.getElementById('playerTableBody');
-    if (!playerTableBodyEl) return;
+    const tbody = document.getElementById('playerTableBody');
+    if (!tbody) return;
 
-    playerTableBodyEl.innerHTML = ''; // Előző tartalom törlése
-
+    tbody.innerHTML = '';
     if (players.length === 0) {
-        playerTableBodyEl.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-gray-500">Nincsenek adatok az adatbázisban.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" class="py-6 text-center text-slate-500 italic">Nincsenek játékosok az adatbázisban.</td></tr>';
         return;
     }
 
-    // Rendezés ID alapján (az átláthatóság kedvéért)
     const sortedPlayers = [...players].sort((a, b) => a.id - b.id);
 
     sortedPlayers.forEach(player => {
-        const row = playerTableBodyEl.insertRow();
-        row.className = 'border-b hover:bg-indigo-50 transition duration-150';
-
-        // ID
-        let cell = row.insertCell();
-        cell.textContent = player.id;
-        cell.className = 'py-3 px-6 font-medium text-gray-900';
-
-        // Név
-        cell = row.insertCell();
-        cell.textContent = player.name || 'N/A';
-        cell.className = 'py-3 px-6 text-gray-700';
-
-        // Életkor
-        cell = row.insertCell();
-        cell.textContent = player.age != null ? player.age : 'N/A';
-        cell.className = 'py-3 px-6 text-gray-700';
-
-        // Műveletek
-        cell = row.insertCell();
-        cell.className = 'py-3 px-6 flex space-x-2 justify-center';
-        // A JSON.stringify és replace() a szigorú HTML-entitások miatt szükséges a beágyazott JS-ben
-        cell.innerHTML = `
-            <button onclick="handleEdit(${JSON.stringify(player).replace(/"/g, '&quot;')})" class="bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-1 px-3 rounded-md transition duration-150 text-sm">
-                Szerkesztés
-            </button>
-            <button onclick="deletePlayer(${player.id})" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-1 px-3 rounded-md transition duration-150 text-sm">
-                Törlés
-            </button>
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-0';
+        tr.innerHTML = `
+            <td class="py-3 px-6 whitespace-nowrap text-sm font-semibold text-slate-600">#${player.id}</td>
+            <td class="py-3 px-6">
+                <div class="font-bold text-slate-800">${player.name || 'N/A'}</div>
+                <div class="text-xs text-slate-500">${player.email || 'Nincs email'}</div>
+            </td>
+            <td class="py-3 px-6 text-sm text-slate-600">${player.age || '-'}</td>
+            <td class="py-3 px-6 text-right whitespace-nowrap">
+                <button onclick='handleEdit(${JSON.stringify(player).replace(/'/g, "&#39;")})' class="text-amber-500 hover:text-amber-700 font-bold px-2 py-1 rounded bg-amber-50 hover:bg-amber-100 mr-2 transition-colors text-sm">Szerkesztés</button>
+                <button onclick="deletePlayer(${player.id})" class="text-rose-500 hover:text-rose-700 font-bold px-2 py-1 rounded bg-rose-50 hover:bg-rose-100 transition-colors text-sm">Törlés</button>
+            </td>
         `;
+        tbody.appendChild(tr);
     });
 }
 
-// Amikor az oldal betöltődik, automatikusan töltse be az adatokat és indítsa a WS-t
+// --- WEBSOCKET LOGIKA ---
+
+function setupWebSocket() {
+    if (ws) ws.close();
+    ws = new WebSocket(WEBSOCKET_URL);
+
+    ws.onopen = () => {
+        updateWsBadge(true);
+        setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "ping" }));
+            }
+        }, 30000);
+    };
+
+    ws.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'PlayerAdded') {
+                if (!playersData.find(p => p.id === data.player.id)) playersData.push(data.player);
+            } else if (data.type === 'PlayerDeleted') {
+                playersData = playersData.filter(p => p.id !== data.id);
+            } else if (data.type === 'PlayerUpdated') {
+                playersData = playersData.map(p => p.id === data.player.id ? data.player : p);
+            }
+            renderPlayers(playersData);
+        } catch (e) { console.error("WS Dekódolási hiba:", e); }
+    };
+
+    ws.onclose = () => {
+        updateWsBadge(false);
+        setTimeout(setupWebSocket, 5000);
+    };
+
+    ws.onerror = () => ws.close();
+}
+
+// --- INIT ---
 window.onload = () => {
     fetchPlayers();
     setupWebSocket();
+    // Első fül aktívvá tétele
+    switchTab('playersTab');
 }
-// Fontos: a JS funkciókat az admin_dashboard.html fájlban is elérhetővé kell tenni!
+
+// Globálissá tétel az inline HTML onclick miatt
 window.handleEdit = handleEdit;
 window.deletePlayer = deletePlayer;
 window.registerFCMToken = registerFCMToken;
@@ -445,3 +326,5 @@ window.addPlayer = addPlayer;
 window.closeEditModal = closeEditModal;
 window.saveEdit = saveEdit;
 window.fetchPlayers = fetchPlayers;
+window.fetchTeams = fetchTeams;
+window.switchTab = switchTab;

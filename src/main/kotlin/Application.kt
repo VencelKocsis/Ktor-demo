@@ -20,16 +20,13 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.server.http.content.*
-import io.ktor.websocket.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.consumeEach
 import kotlinx.serialization.*
 import kotlinx.serialization.json.*
-import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.dao.id.IntIdTable
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.javatime.date
 import org.jetbrains.exposed.sql.javatime.datetime
 import org.jetbrains.exposed.sql.transactions.transaction
@@ -41,13 +38,6 @@ import io.ktor.server.auth.*
 import com.google.firebase.auth.FirebaseAuth as FirebaseAdminAuth
 
 // ---------------- EXPOSED TÁBLÁK DEFINÍCIÓI ----------------
-
-object Players : IntIdTable("players") {
-    val name = varchar("name", 100)
-    val age = integer("age").nullable()
-    val email = varchar("email", 150)
-}
-
 object FcmTokens : IntIdTable("fcm_tokens") {
     val userId = reference("user_id", Users).uniqueIndex()
     val token = text("token")
@@ -138,16 +128,14 @@ object IndividualMatches : IntIdTable("individual_matches") {
 @JsonClassDiscriminator("type")
 sealed class WsEvent {
     @Serializable
-    @SerialName("PlayerAdded")
-    data class PlayerAdded(val player: PlayerDTO) : WsEvent()
-
-    @Serializable
-    @SerialName("PlayerDeleted")
-    data class PlayerDeleted(val id: Int) : WsEvent()
-
-    @Serializable
-    @SerialName("PlayerUpdated")
-    data class PlayerUpdated(val player: PlayerDTO) : WsEvent()
+    @SerialName("IndividualScoreUpdated")
+    data class IndividualScoreUpdated(
+        val individualMatchId: Int,
+        val homeScore: Int,
+        val guestScore: Int,
+        val setScores: String,
+        val status: String
+    ) : WsEvent()
 }
 
 // ---------------- DB Init ----------------
@@ -175,7 +163,7 @@ fun initDatabase(ds: HikariDataSource): Database {
     transaction(db) {
 
         SchemaUtils.createMissingTablesAndColumns(
-            Players, FcmTokens, Users, Clubs, Teams, TeamMembers, Seasons,
+            FcmTokens, Users, Clubs, Teams, TeamMembers, Seasons,
             Matches, IndividualMatches, MatchParticipants
         )
     }
@@ -183,37 +171,6 @@ fun initDatabase(ds: HikariDataSource): Database {
 }
 
 // ---------------- Logika / Seed ----------------
-
-fun generateSetScore(): String {
-    val winPoints = if ((0..10).random() < 8) 11 else (12..15).random()
-    val lossPoints = if (winPoints == 11) (0..9).random() else winPoints - 2
-    return if ((0..1).random() == 0) "$winPoints-$lossPoints" else "$lossPoints-$winPoints"
-}
-
-fun playIndividualMatch(matchId: EntityID<Int>, hPlayerUserId: EntityID<Int>, gPlayerUserId: EntityID<Int>) {
-    var homeSets = 0
-    var guestSets = 0
-    val scores = mutableListOf<String>()
-
-    while (homeSets < 3 && guestSets < 3) {
-        val score = generateSetScore()
-        val parts = score.split("-")
-        if (parts[0].toInt() > parts[1].toInt()) homeSets++ else guestSets++
-        scores.add(score)
-    }
-
-    IndividualMatches.insert {
-        it[IndividualMatches.matchId] = matchId
-        it[homePlayerId] = hPlayerUserId
-        it[guestPlayerId] = gPlayerUserId
-        it[homeScore] = homeSets
-        it[guestScore] = guestSets
-        it[homeSetsWon] = homeSets
-        it[guestSetsWon] = guestSets
-        it[setScores] = scores.joinToString(", ")
-    }
-}
-
 fun seedDatabaseIfNeeded() {
     if (Clubs.selectAll().count() > 0) return
 
@@ -316,15 +273,6 @@ fun sendFcmNotification(db: Database, email: String, token: String, title: Strin
     }
 }
 
-fun savePlayer(db: Database, player: NewPlayerDTO): PlayerDTO {
-    val id = transaction(db) {
-        Players.insertAndGetId {
-            it[name] = player.name; it[age] = player.age; it[email] = player.email
-        }.value
-    }
-    return PlayerDTO(id, player.name, player.age, player.email)
-}
-
 // ---------------- Main ----------------
 
 fun main() {
@@ -380,7 +328,7 @@ fun Application.module(db: Database) {
         timeout = Duration.ofSeconds(60)
     }
 
-    val clients = mutableListOf<DefaultWebSocketServerSession>()
+    val matchWsClients = mutableListOf<DefaultWebSocketServerSession>()
     val json = Json { classDiscriminator = "type"; encodeDefaults = true }
 
     routing {
@@ -542,42 +490,6 @@ fun Application.module(db: Database) {
             }
             if (result) call.respond(HttpStatusCode.OK, mapOf("status" to "ok"))
             else call.respond(HttpStatusCode.NotFound, "User nem található")
-        }
-
-        get("/players") {
-            val players = transaction(db) {
-                Players.selectAll().map { PlayerDTO(it[Players.id].value, it[Players.name], it[Players.age], it[Players.email]) }
-            }
-            call.respond(players)
-        }
-
-        post("/players") {
-            val player = call.receive<NewPlayerDTO>()
-            val saved = savePlayer(db, player)
-            val message = json.encodeToString(WsEvent.serializer(), WsEvent.PlayerAdded(saved))
-            clients.forEach { it.send(message) }
-            call.respond(HttpStatusCode.Created, saved)
-        }
-
-        put("/players/{id}") {
-            val id = call.parameters["id"]?.toIntOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest, "Invalid ID")
-            val updated = call.receive<NewPlayerDTO>()
-            val rowAffected = transaction(db) {
-                Players.update({ Players.id eq id }) { it[name] = updated.name; it[age] = updated.age; it[email] = updated.email }
-            }
-            if (rowAffected == 0) return@put call.respond(HttpStatusCode.NotFound, "Player not found")
-            val saved = PlayerDTO(id, updated.name, updated.age, updated.email)
-            val message = json.encodeToString(WsEvent.serializer(), WsEvent.PlayerUpdated(saved))
-            clients.forEach { it.send(message) }
-            call.respond(saved)
-        }
-
-        delete("/players/{id}") {
-            val id = call.parameters["id"]?.toIntOrNull() ?: return@delete call.respond(HttpStatusCode.BadRequest, "Invalid ID")
-            transaction(db) { Players.deleteWhere { Players.id eq id } }
-            val message = json.encodeToString(WsEvent.serializer(), WsEvent.PlayerDeleted(id))
-            clients.forEach { it.send(message) }
-            call.respond(HttpStatusCode.OK)
         }
 
 
@@ -982,32 +894,17 @@ fun Application.module(db: Database) {
                             it[status] = request.status
                         }
 
-                        // 2. Ha a meccs lezárult, elindítjuk a következőt, hogy újra 2 aktív legyen
+                        // 2. Automatikus léptetés (Ahogy korábban megírtuk)
                         if (rowsAffected > 0 && request.status == "finished") {
-                            // Megkeressük a szülő csapatmeccs ID-ját, hogy csak abban léptessünk
-                            val parentMatchId = IndividualMatches
-                                .slice(IndividualMatches.matchId)
-                                .select { IndividualMatches.id eq individualMatchId }
-                                .singleOrNull()?.get(IndividualMatches.matchId)
-
+                            val parentMatchId = IndividualMatches.slice(IndividualMatches.matchId).select { IndividualMatches.id eq individualMatchId }.singleOrNull()?.get(IndividualMatches.matchId)
                             if (parentMatchId != null) {
-                                // Megszámoljuk, hány meccs van JELENLEG folyamatban
-                                val activeCount = IndividualMatches
-                                    .select { (IndividualMatches.matchId eq parentMatchId) and (IndividualMatches.status eq "in_progress") }
-                                    .count()
-
-                                // Ha kevesebb, mint 2 meccs pörög, aktiváljuk a következőt a sorrend (orderNumber) alapján
+                                val activeCount = IndividualMatches.select { (IndividualMatches.matchId eq parentMatchId) and (IndividualMatches.status eq "in_progress") }.count()
                                 val neededCount = 2 - activeCount.toInt()
                                 if (neededCount > 0) {
                                     val nextMatchesToStart = IndividualMatches
                                         .select { (IndividualMatches.matchId eq parentMatchId) and (IndividualMatches.status eq "pending") }
-                                        .orderBy(IndividualMatches.orderNumber to SortOrder.ASC)
-                                        .limit(neededCount)
-                                        .map { it[IndividualMatches.id] }
-
-                                    IndividualMatches.update({ IndividualMatches.id inList nextMatchesToStart }) {
-                                        it[status] = "in_progress"
-                                    }
+                                        .orderBy(IndividualMatches.orderNumber to SortOrder.ASC).limit(neededCount).map { it[IndividualMatches.id] }
+                                    IndividualMatches.update({ IndividualMatches.id inList nextMatchesToStart }) { it[status] = "in_progress" }
                                 }
                             }
                         }
@@ -1015,6 +912,30 @@ fun Application.module(db: Database) {
                     }
 
                     if (result > 0) {
+                        // --- ÚJ: WEBSOCKET BROADCAST ---
+                        // Szétküldjük az új állást minden csatlakozott kliensnek!
+                        applicationScope.launch {
+                            val event = WsEvent.IndividualScoreUpdated(
+                                individualMatchId = individualMatchId,
+                                homeScore = request.homeScore,
+                                guestScore = request.guestScore,
+                                setScores = request.setScores,
+                                status = request.status
+                            )
+                            val messageText = json.encodeToString(WsEvent.serializer(), event)
+
+                            // Minden élő kapcsolatnak elküldjük a string-et
+                            val activeClients = matchWsClients.toList() // Másolat, hogy elkerüljük a ConcurrentModificationException-t
+                            for (client in activeClients) {
+                                try {
+                                    client.send(io.ktor.websocket.Frame.Text(messageText))
+                                } catch (e: Exception) {
+                                    appLog.warn("Nem sikerült elküldeni a WS üzenetet egy kliensnek: ${e.message}")
+                                }
+                            }
+                        }
+                        // --- WEBSOCKET BROADCAST VÉGE ---
+
                         call.respond(HttpStatusCode.OK, mapOf("status" to "score_updated"))
                     } else {
                         call.respond(HttpStatusCode.NotFound, "Meccs nem található")
@@ -1027,13 +948,14 @@ fun Application.module(db: Database) {
         }
 
         // ---------------- WebSocket ----------------
-        webSocket("/ws/players") {
-            appLog.info("🔗 Új WebSocket kliens csatlakozott. Jelenlegi kliensek száma: ${clients.size + 1}")
-            clients.add(this)
+        // --- Meccsek WebSocket végpontja ---
+        webSocket("/ws/matches") {
+            appLog.info("🏓 Új Meccs WS kliens csatlakozott. Összesen: ${matchWsClients.size + 1}")
+            matchWsClients.add(this)
             try { incoming.consumeEach { } }
             finally {
-                clients.remove(this)
-                appLog.info("💔 WebSocket kliens lekapcsolódott. Jelenlegi kliensek száma: ${clients.size}")
+                matchWsClients.remove(this)
+                appLog.info("💔 Meccs WS kliens lekapcsolódott. Összesen: ${matchWsClients.size}")
             }
         }
 

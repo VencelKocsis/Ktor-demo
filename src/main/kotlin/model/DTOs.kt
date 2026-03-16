@@ -130,21 +130,6 @@ data class FcmTokenRegistration(
 )
 
 @Serializable
-data class PlayerDTO(
-    val id: Int,
-    val name: String,
-    val age: Int?,
-    val email: String
-)
-
-@Serializable
-data class NewPlayerDTO(
-    val name: String,
-    val age: Int?,
-    val email: String
-)
-
-@Serializable
 data class SendNotificationRequest(
     val targetEmail: String,
     val title: String,
