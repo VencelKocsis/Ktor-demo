@@ -250,15 +250,15 @@
             <input type="hidden" id="editTeamId">
             <div>
                 <label class="block text-sm font-semibold">Csapat Név*</label>
-                <input type="text" id="editTeamName" required class="w-full px-4 py-2 border rounded-lg">
+                <input type="text" id="editTeamName" required class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
             </div>
             <div>
                 <label class="block text-sm font-semibold">Divízió</label>
-                <input type="text" id="editTeamDivision" class="w-full px-4 py-2 border rounded-lg">
+                <input type="text" id="editTeamDivision" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
             </div>
-            <div class="flex gap-3 pt-2">
-                <button type="button" onclick="document.getElementById('editTeamModal').classList.add('hidden')" class="flex-1 bg-slate-200 py-2 rounded-lg font-bold">Mégse</button>
-                <button type="submit" class="flex-1 bg-indigo-600 text-white py-2 rounded-lg font-bold">Mentés</button>
+            <div class="flex gap-3 pt-4">
+                <button type="button" onclick="closeEditTeamModal()" class="flex-1 bg-slate-200 hover:bg-slate-300 py-2 rounded-lg font-bold transition-colors">Mégse</button>
+                <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-bold transition-colors">Mentés</button>
             </div>
         </form>
     </div>
@@ -271,15 +271,15 @@
             <input type="hidden" id="editClubId">
             <div>
                 <label class="block text-sm font-semibold">Klub Neve*</label>
-                <input type="text" id="editClubName" required class="w-full px-4 py-2 border rounded-lg">
+                <input type="text" id="editClubName" required class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none">
             </div>
             <div>
                 <label class="block text-sm font-semibold">Cím*</label>
-                <input type="text" id="editClubAddress" required class="w-full px-4 py-2 border rounded-lg">
+                <input type="text" id="editClubAddress" required class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none">
             </div>
-            <div class="flex gap-3 pt-2">
-                <button type="button" onclick="document.getElementById('editClubModal').classList.add('hidden')" class="flex-1 bg-slate-200 py-2 rounded-lg font-bold">Mégse</button>
-                <button type="submit" class="flex-1 bg-emerald-600 text-white py-2 rounded-lg font-bold">Mentés</button>
+            <div class="flex gap-3 pt-4">
+                <button type="button" onclick="closeEditClubModal()" class="flex-1 bg-slate-200 hover:bg-slate-300 py-2 rounded-lg font-bold transition-colors">Mégse</button>
+                <button type="submit" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg font-bold transition-colors">Mentés</button>
             </div>
         </form>
     </div>

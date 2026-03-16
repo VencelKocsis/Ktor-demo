@@ -128,13 +128,86 @@ async function addClub(event) {
     }
 }
 
+// --- JÁTÉKOS LEKÉRDEZÉS (JAVÍTVA) ---
+async function fetchPlayers() {
+    try {
+        // JAVÍTVA: A publikus /users végpontot hívjuk
+        const response = await fetch("/users");
+        if (!response.ok) throw new Error(`Hiba: ${response.status}`);
+        playersData = await response.json();
+
+        const captainSelect = document.getElementById('teamCaptain');
+        if (captainSelect) {
+            captainSelect.innerHTML = '<option value="">Kapitány kiválasztása...</option>';
+            playersData.forEach(player => {
+                captainSelect.innerHTML += `<option value="${player.userId}">${player.name || 'Névtelen'}</option>`;
+            });
+        }
+    } catch (error) {
+        console.error("Nem sikerült lekérni a játékosokat:", error);
+    }
+}
+
+// --- MODAL KÖZÉPRE IGAZÍTÁSA (FLEX HOZZÁADÁSA) ---
+
+function openEditTeam(id) {
+    const team = teamsDataCache.find(t => t.teamId === id);
+    if (!team) return;
+    document.getElementById('editTeamId').value = team.teamId;
+    document.getElementById('editTeamName').value = team.teamName;
+    document.getElementById('editTeamDivision').value = team.division || '';
+
+    const modal = document.getElementById('editTeamModal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex'); // <-- EZ TESZI KÖZÉPRE!
+}
+
+function closeEditTeamModal() {
+    const modal = document.getElementById('editTeamModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+}
+
 function openEditClub(id) {
     const club = clubsDataCache.find(c => c.id === id);
     if (!club) return;
     document.getElementById('editClubId').value = club.id;
     document.getElementById('editClubName').value = club.name;
     document.getElementById('editClubAddress').value = club.address;
-    document.getElementById('editClubModal').classList.remove('hidden');
+
+    const modal = document.getElementById('editClubModal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex'); // <-- EZ TESZI KÖZÉPRE!
+}
+
+function closeEditClubModal() {
+    const modal = document.getElementById('editClubModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+}
+
+// FRISSÍTJÜK A MENTÉS FÜGGVÉNYEKET, HOGY AZ ÚJ BEZÁRÓT HASZNÁLJÁK:
+async function saveTeamEdit(event) {
+    event.preventDefault();
+    const id = document.getElementById('editTeamId').value;
+    const divisionVal = document.getElementById('editTeamDivision').value.trim();
+    const updateData = {
+        name: document.getElementById('editTeamName').value.trim(),
+        division: divisionVal.length > 0 ? divisionVal : null
+    };
+    try {
+        const response = await fetch(`${TEAMS_API_URL}/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updateData)
+        });
+        if (!response.ok) throw new Error('Hiba a frissítésnél');
+        closeEditTeamModal(); // JAVÍTVA
+        showStatus('Csapat frissítve!');
+        fetchTeams();
+    } catch (error) {
+        showStatus(error.message, true);
+    }
 }
 
 async function saveClubEdit(event) {
@@ -151,34 +224,12 @@ async function saveClubEdit(event) {
             body: JSON.stringify(updateData)
         });
         if (!response.ok) throw new Error('Hiba a frissítésnél');
-        document.getElementById('editClubModal').classList.add('hidden');
+        closeEditClubModal(); // JAVÍTVA
         showStatus('Klub frissítve!');
         fetchClubs();
         fetchTeams();
     } catch (error) {
         showStatus(error.message, true);
-    }
-}
-
-// --- JÁTÉKOSOK (Csapatkapitány választóhoz kell!) ---
-async function fetchPlayers() {
-    try {
-        // Figyelem: A BACKEND_API_URL végpontnak mindenképpen vissza kell adnia a regisztrált usereket!
-        // Ha /players végpontod nincs, használd a /users/available végpontot!
-        const response = await fetch("/users/available");
-        if (!response.ok) throw new Error(`Hiba: ${response.status}`);
-        playersData = await response.json();
-
-        // Csak a legördülő menüt frissítjük
-        const captainSelect = document.getElementById('teamCaptain');
-        if (captainSelect) {
-            captainSelect.innerHTML = '<option value="">Kapitány kiválasztása...</option>';
-            playersData.forEach(player => {
-                captainSelect.innerHTML += `<option value="${player.userId}">${player.name || 'Névtelen'}</option>`;
-            });
-        }
-    } catch (error) {
-        console.error("Nem sikerült lekérni a játékosokat a kapitány listához:", error);
     }
 }
 
@@ -273,38 +324,6 @@ async function addTeam(event) {
     }
 }
 
-function openEditTeam(id) {
-    const team = teamsDataCache.find(t => t.teamId === id);
-    if (!team) return;
-    document.getElementById('editTeamId').value = team.teamId;
-    document.getElementById('editTeamName').value = team.teamName;
-    document.getElementById('editTeamDivision').value = team.division || '';
-    document.getElementById('editTeamModal').classList.remove('hidden');
-}
-
-async function saveTeamEdit(event) {
-    event.preventDefault();
-    const id = document.getElementById('editTeamId').value;
-    const divisionVal = document.getElementById('editTeamDivision').value.trim();
-    const updateData = {
-        name: document.getElementById('editTeamName').value.trim(),
-        division: divisionVal.length > 0 ? divisionVal : null
-    };
-    try {
-        const response = await fetch(`${TEAMS_API_URL}/${id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(updateData)
-        });
-        if (!response.ok) throw new Error('Hiba a frissítésnél');
-        document.getElementById('editTeamModal').classList.add('hidden');
-        showStatus('Csapat frissítve!');
-        fetchTeams();
-    } catch (error) {
-        showStatus(error.message, true);
-    }
-}
-
 // --- FCM TESZT ---
 
 async function registerFCMToken() {
@@ -339,6 +358,8 @@ window.onload = () => {
 // Hogy a HTML-ből hívhatók legyenek a függvények:
 window.registerFCMToken = registerFCMToken;
 window.fetchClubs = fetchClubs;
+window.closeEditTeamModal = closeEditTeamModal;
+window.closeEditClubModal = closeEditClubModal;
 window.addClub = addClub;
 window.openEditClub = openEditClub;
 window.saveClubEdit = saveClubEdit;

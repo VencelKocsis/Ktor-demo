@@ -553,15 +553,6 @@ fun Application.module(db: Database) {
             else call.respond(HttpStatusCode.NotFound, "User nem található")
         }
 
-        put("/teams/{id}") {
-            val teamId = call.parameters["id"]?.toIntOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest, "Érvénytelen csapat ID")
-            val updateData = call.receive<TeamUpdateDTO>()
-            val rowsAffected = transaction(db) {
-                Teams.update({ Teams.id eq teamId }) { it[name] = updateData.name }
-            }
-            if (rowsAffected > 0) call.respond(HttpStatusCode.OK, mapOf("status" to "updated")) else call.respond(HttpStatusCode.NotFound, "Csapat nem található")
-        }
-
         // --- KLUB LÉTREHOZÁSA ---
         post("/clubs") {
             try {
@@ -593,6 +584,38 @@ fun Application.module(db: Database) {
             } catch (e: Exception) {
                 call.respond(HttpStatusCode.BadRequest, "Hiba: ${e.message}")
             }
+        }
+
+        // --- MINDEN FELHASZNÁLÓ LEKÉRDEZÉSE (A legördülő menühöz) ---
+        get("/users") {
+            try {
+                val allUsers = transaction(db) {
+                    Users.selectAll().map { row ->
+                        MemberDTO(
+                            userId = row[Users.id].value,
+                            firebaseUid = row[Users.firebaseUid],
+                            name = "${row[Users.lastName]} ${row[Users.firstName]}",
+                            isCaptain = false
+                        )
+                    }
+                }
+                call.respond(HttpStatusCode.OK, allUsers)
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, "Adatbázis hiba")
+            }
+        }
+
+        // --- CSAPAT MÓDOSÍTÁSA (JAVÍTVA: A divíziót is mentjük!) ---
+        put("/teams/{id}") {
+            val teamId = call.parameters["id"]?.toIntOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest, "Érvénytelen csapat ID")
+            val updateData = call.receive<TeamUpdateDTO>()
+            val rowsAffected = transaction(db) {
+                Teams.update({ Teams.id eq teamId }) {
+                    it[name] = updateData.name
+                    it[division] = if (updateData.division.isNullOrBlank()) null else updateData.division
+                }
+            }
+            if (rowsAffected > 0) call.respond(HttpStatusCode.OK, mapOf("status" to "updated")) else call.respond(HttpStatusCode.NotFound, "Csapat nem található")
         }
 
         // ====================================================================
