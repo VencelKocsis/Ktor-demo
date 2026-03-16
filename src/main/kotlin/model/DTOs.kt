@@ -3,6 +3,16 @@ package hu.bme.aut.android.demo.model
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class MatchCreateDTO(
+    val seasonId: Int,
+    val roundNumber: Int,
+    val homeTeamId: Int,
+    val guestTeamId: Int,
+    val matchDate: String, // "YYYY-MM-DDTHH:mm" formátumban jön a HTML-ből
+    val location: String
+)
+
+@Serializable
 data class TeamCreateDTO(
     val clubId: Int,
     val name: String,

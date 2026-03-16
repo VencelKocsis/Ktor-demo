@@ -618,6 +618,78 @@ fun Application.module(db: Database) {
             if (rowsAffected > 0) call.respond(HttpStatusCode.OK, mapOf("status" to "updated")) else call.respond(HttpStatusCode.NotFound, "Csapat nem található")
         }
 
+        // --- SZEZONOK LEKÉRDEZÉSE ---
+        get("/seasons") {
+            try {
+                val seasons = transaction(db) {
+                    Seasons.selectAll().map {
+                        SeasonDTO(
+                            id = it[Seasons.id].value,
+                            name = it[Seasons.name],
+                            startDate = it[Seasons.startDate].toString(),
+                            endDate = it[Seasons.endDate].toString(),
+                            isActive = it[Seasons.isActive]
+                        )
+                    }
+                }
+                call.respond(seasons)
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, "Adatbázis hiba")
+            }
+        }
+
+        // --- ÚJ MÉRKŐZÉS LÉTREHOZÁSA ---
+        post("/matches") {
+            try {
+                val request = call.receive<MatchCreateDTO>()
+
+                if (request.homeTeamId == request.guestTeamId) {
+                    return@post call.respond(HttpStatusCode.BadRequest, "Egy csapat nem játszhat önmaga ellen!")
+                }
+
+                val newMatchId = transaction(db) {
+                    // 1. Meccs létrehozása
+                    val mId = Matches.insertAndGetId {
+                        it[seasonId] = request.seasonId
+                        it[roundNumber] = request.roundNumber
+                        it[homeTeamId] = request.homeTeamId
+                        it[guestTeamId] = request.guestTeamId
+                        it[matchDate] = java.time.LocalDateTime.parse(request.matchDate) // Átalakítjuk a HTML dátumot
+                        it[location] = request.location
+                        it[status] = "scheduled"
+                    }
+
+                    // 2. Hazai csapat játékosainak hozzáadása (SELECTED státusszal)
+                    val homePlayers = TeamMembers.select { TeamMembers.teamId eq request.homeTeamId }.map { it[TeamMembers.userId] }
+                    homePlayers.forEach { uId ->
+                        MatchParticipants.insert {
+                            it[matchId] = mId
+                            it[userId] = uId
+                            it[teamSide] = "HOME"
+                            it[status] = "SELECTED"
+                        }
+                    }
+
+                    // 3. Vendég csapat játékosainak hozzáadása
+                    val guestPlayers = TeamMembers.select { TeamMembers.teamId eq request.guestTeamId }.map { it[TeamMembers.userId] }
+                    guestPlayers.forEach { uId ->
+                        MatchParticipants.insert {
+                            it[matchId] = mId
+                            it[userId] = uId
+                            it[teamSide] = "GUEST"
+                            it[status] = "SELECTED"
+                        }
+                    }
+
+                    mId.value
+                }
+                call.respond(HttpStatusCode.Created, mapOf("id" to newMatchId.toString(), "status" to "created"))
+            } catch (e: Exception) {
+                appLog.error("Hiba a meccs mentésekor: ${e.message}")
+                call.respond(HttpStatusCode.BadRequest, "Hiba a mentésnél: ${e.message}")
+            }
+        }
+
         // ====================================================================
         // VÉDETT VÉGPONTOK (Csak Firebase tokennel)
         // ====================================================================
