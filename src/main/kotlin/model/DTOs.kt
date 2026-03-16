@@ -76,7 +76,9 @@ data class MatchDTO(
     val homeTeamId: Int,
     val guestTeamId: Int,
     val individualMatches: List<IndividualMatchDTO>? = null,
-    val participants: List<MatchParticipantDTO>? = null
+    val participants: List<MatchParticipantDTO>? = null,
+    val homeTeamSigned: Boolean = false,
+    val guestTeamSigned: Boolean = false
 )
 
 @Serializable

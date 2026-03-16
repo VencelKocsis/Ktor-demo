@@ -86,6 +86,8 @@ object Matches : IntIdTable("matches") {
     val matchDate = datetime("match_date").nullable()
     val status = varchar("status", 20).default("scheduled")
     val location = varchar("location", 255).nullable()
+    val homeTeamSigned = bool("home_team_signed").default(false)
+    val guestTeamSigned = bool("guest_team_signed").default(false)
 }
 
 object MatchParticipants : IntIdTable("match_participants") {
@@ -136,6 +138,15 @@ sealed class WsEvent {
         val setScores: String,
         val status: String
     ) : WsEvent()
+
+    @Serializable
+    @SerialName("MatchSignatureUpdated")
+    data class MatchSignatureUpdated(
+        val matchId: Int,
+        val homeSigned: Boolean,
+        val guestSigned: Boolean,
+        val status: String
+    ) : WsEvent() // Vagy MatchWsEvent az Androidban
 }
 
 // ---------------- DB Init ----------------
@@ -943,6 +954,60 @@ fun Application.module(db: Database) {
                 } catch (e: Exception) {
                     appLog.error("Hiba a pontozásnál: ${e.message}", e)
                     call.respond(HttpStatusCode.InternalServerError, "Szerver hiba: ${e.message}")
+                }
+            }
+
+            // --- EGYÉNI MECCS BEFEJEZÉSE ALÁíRÁSSAL
+            post("/matches/{matchId}/sign") {
+                val principal = call.principal<UserIdPrincipal>()
+                val firebaseUid = principal?.name ?: return@post call.respond(HttpStatusCode.Unauthorized)
+                val matchId = call.parameters["matchId"]?.toIntOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, "Érvénytelen meccs ID")
+
+                try {
+                    val result = transaction(db) {
+                        val userRow = Users.select { Users.firebaseUid eq firebaseUid }.single()
+                        val matchRow = Matches.select { Matches.id eq matchId }.single()
+
+                        // Ellenőrizzük, hogy a user melyik csapatban van
+                        val isHome = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.homeTeamId]) and (TeamMembers.userId eq userRow[Users.id]) }.count() > 0
+                        val isGuest = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.guestTeamId]) and (TeamMembers.userId eq userRow[Users.id]) }.count() > 0
+
+                        if (!isHome && !isGuest) throw Exception("Nem vagy jogosult aláírni ezt a meccset!")
+
+                        // Frissítjük az aláírásokat
+                        Matches.update({ Matches.id eq matchId }) {
+                            if (isHome) it[homeTeamSigned] = true
+                            if (isGuest) it[guestTeamSigned] = true
+                        }
+
+                        // Visszaolvassuk az új állapotot
+                        val updatedMatch = Matches.select { Matches.id eq matchId }.single()
+                        val hSigned = updatedMatch[Matches.homeTeamSigned]
+                        val gSigned = updatedMatch[Matches.guestTeamSigned]
+                        var newStatus = updatedMatch[Matches.status]
+
+                        // Ha mindkét fél aláírta, LEZÁRJUK a meccset
+                        if (hSigned && gSigned) {
+                            newStatus = "finished"
+                            Matches.update({ Matches.id eq matchId }) { it[status] = newStatus }
+                        }
+
+                        Triple(hSigned, gSigned, newStatus)
+                    }
+
+                    // BROADCASTOLJUK a WebSocketen, hogy a másik csapat telefonján is azonnal zöldre váltson az aláírás!
+                    applicationScope.launch {
+                        val event = WsEvent.MatchSignatureUpdated(matchId, result.first, result.second, result.third)
+                        val messageText = json.encodeToString(WsEvent.serializer(), event)
+                        matchWsClients.toList().forEach { client ->
+                            try { client.send(io.ktor.websocket.Frame.Text(messageText)) } catch (_: Exception) {}
+                        }
+                    }
+
+                    call.respond(HttpStatusCode.OK, mapOf("status" to "signed", "matchStatus" to result.third))
+
+                } catch (e: Exception) {
+                    call.respond(HttpStatusCode.BadRequest, e.message ?: "Hiba")
                 }
             }
         }
