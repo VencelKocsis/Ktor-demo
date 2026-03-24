@@ -1,7 +1,7 @@
 // ==========================================
 // KONSTANSOK & GLOBÁLIS ÁLLAPOT
 // ==========================================
-const BACKEND_API_URL = "/users";
+const BACKEND_API_URL = "/users/available";
 const CLUBS_API_URL = "/clubs";
 const TEAMS_API_URL = "/teams";
 const SEASONS_API_URL = "/seasons";

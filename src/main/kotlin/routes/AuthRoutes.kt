@@ -18,6 +18,24 @@ private val appLog = LoggerFactory.getLogger("AuthRoutes")
 fun Route.authRoutes(db: Database) {
 
     // ==========================================
+    // 1. PUBLIKUS VÉGPONTOK (Admin weboldalhoz)
+    // ==========================================
+
+    // --- SZABAD JÁTÉKOSOK LEKÉRDEZÉSE ---
+    get("/users/available") {
+        val availableUsers = transaction(db) {
+            val usersInTeams = TeamMembers.slice(TeamMembers.userId).selectAll()
+            Users.select { Users.id notInSubQuery usersInTeams }.map { row ->
+                MemberDTO(
+                    userId = row[Users.id].value, firebaseUid = row[Users.firebaseUid],
+                    name = "${row[Users.lastName]} ${row[Users.firstName]}", isCaptain = false
+                )
+            }
+        }
+        call.respond(HttpStatusCode.OK, availableUsers)
+    }
+
+    // ==========================================
     // VÉDETT VÉGPONTOK (Mobil applikációhoz)
     // ==========================================
 
@@ -88,20 +106,6 @@ fun Route.authRoutes(db: Database) {
                 } else null
             }
             if (updatedUser != null) call.respond(HttpStatusCode.OK, updatedUser) else call.respond(HttpStatusCode.NotFound, "Nincs ilyen")
-        }
-
-        // --- SZABAD JÁTÉKOSOK LEKÉRDEZÉSE ---
-        get("/users/available") {
-            val availableUsers = transaction(db) {
-                val usersInTeams = TeamMembers.slice(TeamMembers.userId).selectAll()
-                Users.select { Users.id notInSubQuery usersInTeams }.map { row ->
-                    MemberDTO(
-                        userId = row[Users.id].value, firebaseUid = row[Users.firebaseUid],
-                        name = "${row[Users.lastName]} ${row[Users.firstName]}", isCaptain = false
-                    )
-                }
-            }
-            call.respond(HttpStatusCode.OK, availableUsers)
         }
     }
 }
