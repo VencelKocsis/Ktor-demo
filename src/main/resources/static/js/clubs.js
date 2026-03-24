@@ -1,0 +1,101 @@
+async function fetchClubs() {
+    try {
+        const response = await fetch(CLUBS_API_URL);
+        if (!response.ok) throw new Error("Hiba a klubok lekérésénél.");
+
+        clubsDataCache = await response.json();
+
+        const clubSelect = document.getElementById('teamClub');
+        if (clubSelect) {
+            clubSelect.innerHTML = '<option value="">Válassz klubot...</option>';
+            clubsDataCache.forEach(club => {
+                clubSelect.innerHTML += `<option value="${club.id}">${club.name}</option>`;
+            });
+        }
+
+        const container = document.getElementById('clubsContainer');
+        if (container) {
+            container.innerHTML = '';
+            if (clubsDataCache.length === 0) {
+                container.innerHTML = '<div class="col-span-full text-center py-4 text-slate-500 dark:text-slate-400">Még nincsenek klubok.</div>';
+                return;
+            }
+
+            clubsDataCache.forEach(club => {
+                container.innerHTML += `
+                    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm flex justify-between items-center transition-colors">
+                        <div>
+                            <h3 class="font-bold text-slate-800 dark:text-white">${club.name}</h3>
+                            <p class="text-xs text-slate-500 dark:text-slate-400">${club.address}</p>
+                        </div>
+                        <button onclick="openEditClub(${club.id})" class="text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 text-sm font-bold bg-emerald-50 dark:bg-emerald-900/30 px-3 py-1.5 rounded-md transition-colors">Módosít</button>
+                    </div>
+                `;
+            });
+        }
+    } catch (error) {
+        console.error("Klubok betöltése sikertelen:", error);
+    }
+}
+
+async function addClub(event) {
+    event.preventDefault();
+    const newClubData = {
+        name: document.getElementById('clubName').value.trim(),
+        address: document.getElementById('clubAddress').value.trim()
+    };
+    try {
+        const response = await fetch(CLUBS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newClubData)
+        });
+        if (!response.ok) throw new Error('Hiba a mentésnél');
+        document.getElementById('addClubForm').reset();
+        showStatus('Klub sikeresen létrehozva!');
+        fetchClubs();
+    } catch (error) {
+        showStatus(error.message, true);
+    }
+}
+
+function openEditClub(id) {
+    const club = clubsDataCache.find(c => c.id === id);
+    if (!club) return;
+    document.getElementById('editClubId').value = club.id;
+    document.getElementById('editClubName').value = club.name;
+    document.getElementById('editClubAddress').value = club.address;
+
+    const modal = document.getElementById('editClubModal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+
+function closeEditClubModal() {
+    const modal = document.getElementById('editClubModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+}
+
+async function saveClubEdit(event) {
+    event.preventDefault();
+    const id = document.getElementById('editClubId').value;
+    const updateData = {
+        name: document.getElementById('editClubName').value.trim(),
+        address: document.getElementById('editClubAddress').value.trim()
+    };
+    try {
+        const response = await fetch(`${CLUBS_API_URL}/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updateData)
+        });
+        if (!response.ok) throw new Error('Hiba a frissítésnél');
+        closeEditClubModal();
+        showStatus('Klub frissítve!');
+        fetchClubs();
+        fetchTeams(); // Csapatokat is frissítjük a névváltozás miatt
+    } catch (error) {
+        showStatus(error.message, true);
+    }
+}
