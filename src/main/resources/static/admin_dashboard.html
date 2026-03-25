@@ -7,9 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
 
     <script>
-        tailwind.config = {
-            darkMode: 'class',
-        }
+        tailwind.config = { darkMode: 'class', }
     </script>
 
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -33,10 +31,16 @@
                 <div class="bg-indigo-600 text-white p-2 rounded-lg">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
                 </div>
-                <h1 class="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight">Klub Adminisztráció</h1>
+                <h1 class="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight" data-i18n="title">Klub Adminisztráció</h1>
             </div>
 
             <div class="flex items-center gap-4">
+
+                <div class="flex bg-slate-100 dark:bg-slate-700 rounded-lg p-1 border border-slate-200 dark:border-slate-600">
+                    <button id="lang-hu" onclick="setLanguage('hu')" class="px-2 py-1 text-xs font-bold rounded hover:bg-white dark:hover:bg-slate-600 transition-colors text-slate-800 dark:text-white">HU</button>
+                    <button id="lang-en" onclick="setLanguage('en')" class="px-2 py-1 text-xs font-bold rounded opacity-50 hover:bg-white dark:hover:bg-slate-600 transition-colors text-slate-800 dark:text-white">EN</button>
+                </div>
+
                 <button onclick="toggleDarkMode()" class="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700 transition-colors" title="Sötét/Világos mód">
                     <svg id="themeIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
@@ -45,7 +49,7 @@
 
                 <div id="wsStatus" class="inline-flex items-center gap-1.5 rounded-full bg-slate-100 dark:bg-slate-700 px-3 py-1 text-sm font-semibold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600 shadow-sm transition-colors">
                     <span class="w-2 h-2 rounded-full bg-slate-400" id="wsDot"></span>
-                    <span id="wsText">WS Csatlakozás...</span>
+                    <span id="wsText" data-i18n="ws_connecting">WS Csatlakozás...</span>
                 </div>
             </div>
         </div>
@@ -57,133 +61,110 @@
     <div id="status" class="hidden w-full p-4 mb-6 rounded-lg font-medium text-sm text-center transition-all duration-300"></div>
 
     <nav class="flex space-x-8 border-b border-slate-200 dark:border-slate-700 mb-8" aria-label="Tabs">
-        <button onclick="switchTab('teamsTab')" id="btn-teamsTab" class="tab-active pb-4 px-1 text-base transition-colors duration-200">
+        <button onclick="switchTab('teamsTab')" id="btn-teamsTab" class="tab-active pb-4 px-1 text-base transition-colors duration-200" data-i18n="tab_teams">
             Csapatok & Ligák
         </button>
-        <button onclick="switchTab('matchesTab')" id="btn-matchesTab" class="tab-inactive pb-4 px-1 text-base transition-colors duration-200">
+        <button onclick="switchTab('matchesTab')" id="btn-matchesTab" class="tab-inactive pb-4 px-1 text-base transition-colors duration-200" data-i18n="tab_matches">
             Mérkőzések
         </button>
-        <button onclick="switchTab('systemTab')" id="btn-systemTab" class="tab-inactive pb-4 px-1 text-base transition-colors duration-200">
+        <button onclick="switchTab('systemTab')" id="btn-systemTab" class="tab-inactive pb-4 px-1 text-base transition-colors duration-200" data-i18n="tab_system">
             Rendszer & Értesítések
         </button>
     </nav>
 
     <div id="teamsTab" class="tab-content block">
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-
             <div class="lg:col-span-1 space-y-8">
-
                 <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-6">
-                    <h2 class="text-lg font-bold text-slate-800 dark:text-white mb-4">Új Csapat Létrehozása</h2>
+                    <h2 class="text-lg font-bold text-slate-800 dark:text-white mb-4" data-i18n="new_team_title">Új Csapat Létrehozása</h2>
                     <form id="addTeamForm" onsubmit="addTeam(event)" class="space-y-4">
                         <div>
-                            <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Klub*</label>
-                            <select id="teamClub" required class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
-                                <option value="">Klubok betöltése...</option>
-                            </select>
+                            <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1" data-i18n="club_label">Klub*</label>
+                            <select id="teamClub" required class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"></select>
                         </div>
                         <div>
-                            <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Csapat Név*</label>
-                            <input type="text" id="teamName" required placeholder="pl. BEAC III." class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                            <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1" data-i18n="team_name_label">Csapat Név*</label>
+                            <input type="text" id="teamName" required class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                         </div>
                         <div>
-                            <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Divízió / Osztály</label>
-                            <input type="text" id="teamDivision" placeholder="pl. Budapest I." class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                            <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1" data-i18n="division_label">Divízió / Osztály</label>
+                            <input type="text" id="teamDivision" class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                         </div>
                         <div>
-                            <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Csapatkapitány*</label>
-                            <select id="teamCaptain" required class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
-                                <option value="">Kapitány kiválasztása...</option>
-                            </select>
+                            <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1" data-i18n="captain_label">Csapatkapitány*</label>
+                            <select id="teamCaptain" required class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"></select>
                         </div>
-                        <button type="submit" class="w-full mt-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-lg transition-all flex justify-center items-center gap-2">
-                            Mentés
-                        </button>
+                        <button type="submit" class="w-full mt-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-lg transition-all" data-i18n="save_btn">Mentés</button>
                     </form>
                 </div>
 
                 <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-6">
-                    <h2 class="text-lg font-bold text-slate-800 dark:text-white mb-4">Új Klub Létrehozása</h2>
+                    <h2 class="text-lg font-bold text-slate-800 dark:text-white mb-4" data-i18n="new_club_title">Új Klub Létrehozása</h2>
                     <form id="addClubForm" onsubmit="addClub(event)" class="space-y-4">
                         <div>
-                            <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Klub Neve*</label>
-                            <input type="text" id="clubName" required placeholder="pl. Vasas SC" class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-white rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none">
+                            <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1" data-i18n="club_name_label">Klub Neve*</label>
+                            <input type="text" id="clubName" required class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-white rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none">
                         </div>
                         <div>
-                            <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Cím*</label>
-                            <input type="text" id="clubAddress" required placeholder="pl. 1139 Bp, Fáy utca 58." class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-white rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none">
+                            <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1" data-i18n="address_label">Cím*</label>
+                            <input type="text" id="clubAddress" required class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-white rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none">
                         </div>
-                        <button type="submit" class="w-full mt-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-lg transition-all flex justify-center items-center gap-2">
-                            Klub Mentése
-                        </button>
+                        <button type="submit" class="w-full mt-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-lg transition-all" data-i18n="save_club_btn">Klub Mentése</button>
                     </form>
                 </div>
-
             </div>
 
             <div class="lg:col-span-2 space-y-8">
-
                 <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
                     <div class="p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
-                        <h2 class="text-lg font-bold text-slate-800 dark:text-white">Csapatok</h2>
-                        <button onclick="fetchTeams()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1.5 px-3 rounded-lg text-sm">Frissítés</button>
+                        <h2 class="text-lg font-bold text-slate-800 dark:text-white" data-i18n="teams_title">Csapatok</h2>
+                        <button onclick="fetchTeams()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1.5 px-3 rounded-lg text-sm" data-i18n="refresh_btn">Frissítés</button>
                     </div>
-                    <div class="p-6">
-                        <div id="teamsContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        </div>
-                    </div>
+                    <div class="p-6"><div id="teamsContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div></div>
                 </div>
 
                 <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
                     <div class="p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
-                        <h2 class="text-lg font-bold text-slate-800 dark:text-white">Klubok</h2>
-                        <button onclick="fetchClubs()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-3 rounded-lg text-sm">Frissítés</button>
+                        <h2 class="text-lg font-bold text-slate-800 dark:text-white" data-i18n="clubs_title">Klubok</h2>
+                        <button onclick="fetchClubs()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-3 rounded-lg text-sm" data-i18n="refresh_btn">Frissítés</button>
                     </div>
-                    <div class="p-6">
-                        <div id="clubsContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        </div>
-                    </div>
+                    <div class="p-6"><div id="clubsContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div></div>
                 </div>
-
             </div>
-
         </div>
     </div>
 
     <div id="matchesTab" class="tab-content hidden">
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-
             <div class="lg:col-span-1">
                 <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-6 sticky top-24">
-                    <h2 class="text-lg font-bold text-slate-800 dark:text-white mb-4">Új Mérkőzés Kiírása</h2>
+                    <h2 class="text-lg font-bold text-slate-800 dark:text-white mb-4" data-i18n="new_match_title">Új Mérkőzés Kiírása</h2>
                     <form id="addMatchForm" onsubmit="addMatch(event)" class="space-y-4">
                         <div>
-                            <label class="block text-sm font-semibold dark:text-slate-300 mb-1">Szezon*</label>
+                            <label class="block text-sm font-semibold dark:text-slate-300 mb-1" data-i18n="season_label">Szezon*</label>
                             <select id="matchSeason" required class="w-full px-4 py-2 border rounded-lg dark:bg-slate-700 dark:border-slate-600 focus:ring-2 focus:ring-indigo-500 outline-none"></select>
                         </div>
                         <div>
-                            <label class="block text-sm font-semibold dark:text-slate-300 mb-1">Kör (Forduló)*</label>
-                            <input type="number" id="matchRound" required min="1" placeholder="pl. 1" class="w-full px-4 py-2 border rounded-lg dark:bg-slate-700 dark:border-slate-600 focus:ring-2 focus:ring-indigo-500 outline-none">
+                            <label class="block text-sm font-semibold dark:text-slate-300 mb-1" data-i18n="round_label">Kör (Forduló)*</label>
+                            <input type="number" id="matchRound" required min="1" class="w-full px-4 py-2 border rounded-lg dark:bg-slate-700 dark:border-slate-600 focus:ring-2 focus:ring-indigo-500 outline-none">
                         </div>
                         <div>
-                            <label class="block text-sm font-semibold dark:text-slate-300 mb-1">Hazai Csapat*</label>
+                            <label class="block text-sm font-semibold dark:text-slate-300 mb-1" data-i18n="home_team_label">Hazai Csapat*</label>
                             <select id="matchHomeTeam" required class="w-full px-4 py-2 border rounded-lg dark:bg-slate-700 dark:border-slate-600 focus:ring-2 focus:ring-indigo-500 outline-none"></select>
                         </div>
                         <div>
-                            <label class="block text-sm font-semibold dark:text-slate-300 mb-1">Vendég Csapat*</label>
+                            <label class="block text-sm font-semibold dark:text-slate-300 mb-1" data-i18n="guest_team_label">Vendég Csapat*</label>
                             <select id="matchGuestTeam" required class="w-full px-4 py-2 border rounded-lg dark:bg-slate-700 dark:border-slate-600 focus:ring-2 focus:ring-indigo-500 outline-none"></select>
                         </div>
                         <div>
-                            <label class="block text-sm font-semibold dark:text-slate-300 mb-1">Dátum és Időpont*</label>
+                            <label class="block text-sm font-semibold dark:text-slate-300 mb-1" data-i18n="datetime_label">Dátum és Időpont*</label>
                             <input type="datetime-local" id="matchDate" required class="w-full px-4 py-2 border rounded-lg dark:bg-slate-700 dark:border-slate-600 focus:ring-2 focus:ring-indigo-500 outline-none">
                         </div>
                         <div>
-                            <label class="block text-sm font-semibold dark:text-slate-300 mb-1">Helyszín*</label>
-                            <input type="text" id="matchLocation" required placeholder="pl. BEAC Csarnok" class="w-full px-4 py-2 border rounded-lg dark:bg-slate-700 dark:border-slate-600 focus:ring-2 focus:ring-indigo-500 outline-none">
+                            <label class="block text-sm font-semibold dark:text-slate-300 mb-1" data-i18n="location_label">Helyszín*</label>
+                            <input type="text" id="matchLocation" required class="w-full px-4 py-2 border rounded-lg dark:bg-slate-700 dark:border-slate-600 focus:ring-2 focus:ring-indigo-500 outline-none">
                         </div>
-                        <button type="submit" class="w-full mt-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-lg transition-colors">
-                            Mérkőzés Létrehozása
-                        </button>
+                        <button type="submit" class="w-full mt-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-lg transition-colors" data-i18n="create_match_btn">Mérkőzés Létrehozása</button>
                     </form>
                 </div>
             </div>
@@ -191,16 +172,12 @@
             <div class="lg:col-span-2">
                 <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
                     <div class="p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
-                        <h2 class="text-lg font-bold text-slate-800 dark:text-white">Kiírt Mérkőzések</h2>
-                        <button onclick="fetchMatches()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1.5 px-3 rounded-lg text-sm">Frissítés</button>
+                        <h2 class="text-lg font-bold text-slate-800 dark:text-white" data-i18n="scheduled_matches_title">Kiírt Mérkőzések</h2>
+                        <button onclick="fetchMatches()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1.5 px-3 rounded-lg text-sm" data-i18n="refresh_btn">Frissítés</button>
                     </div>
-                    <div class="p-6">
-                        <div id="matchesContainer" class="space-y-4">
-                        </div>
-                    </div>
+                    <div class="p-6"><div id="matchesContainer" class="space-y-4"></div></div>
                 </div>
             </div>
-
         </div>
     </div>
 
@@ -211,64 +188,20 @@
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
                 </div>
                 <div class="flex-1">
-                    <h2 class="text-lg font-bold text-slate-800 dark:text-white">Push Értesítések Tesztelése (FCM)</h2>
-                    <p class="text-sm text-slate-600 dark:text-slate-400 mt-1 mb-4">A Firebase Cloud Messaging (FCM) rendszer tesztelése. Ha rányomsz, regisztrál egy dummy tokent a böngészőhöz.</p>
+                    <h2 class="text-lg font-bold text-slate-800 dark:text-white" data-i18n="fcm_title">Push Értesítések Tesztelése (FCM)</h2>
+                    <p class="text-sm text-slate-600 dark:text-slate-400 mt-1 mb-4" data-i18n="fcm_desc">A Firebase Cloud Messaging (FCM) rendszer tesztelése...</p>
 
                     <div class="flex items-center gap-4 bg-slate-50 dark:bg-slate-700 p-4 rounded-lg border border-slate-200 dark:border-slate-600">
-                        <button onclick="registerFCMToken()" class="bg-slate-800 dark:bg-slate-600 hover:bg-slate-900 dark:hover:bg-slate-500 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-sm text-sm">
-                            Teszt Token Küldése
-                        </button>
-                        <span id="fcmStatus" class="text-sm font-semibold text-slate-500 dark:text-slate-400">Várakozás...</span>
+                        <button onclick="registerFCMToken()" class="bg-slate-800 dark:bg-slate-600 hover:bg-slate-900 dark:hover:bg-slate-500 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-sm text-sm" data-i18n="send_token_btn">Teszt Token Küldése</button>
+                        <span id="fcmStatus" class="text-sm font-semibold text-slate-500 dark:text-slate-400" data-i18n="waiting">Várakozás...</span>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-
 </main>
 
-<div id="editTeamModal" class="fixed inset-0 bg-slate-900/60 hidden items-center justify-center p-4 z-50 backdrop-blur-sm">
-    <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md p-6 border dark:border-slate-700">
-        <h3 class="text-lg font-bold text-slate-800 dark:text-white mb-4">Csapat Szerkesztése</h3>
-        <form id="editTeamForm" onsubmit="saveTeamEdit(event)" class="space-y-4">
-            <input type="hidden" id="editTeamId">
-            <div>
-                <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Csapat Név*</label>
-                <input type="text" id="editTeamName" required class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
-            </div>
-            <div>
-                <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Divízió</label>
-                <input type="text" id="editTeamDivision" class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
-            </div>
-            <div class="flex gap-3 pt-4">
-                <button type="button" onclick="closeEditTeamModal()" class="flex-1 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 py-2 rounded-lg font-bold transition-colors">Mégse</button>
-                <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-bold transition-colors">Mentés</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<div id="editClubModal" class="fixed inset-0 bg-slate-900/60 hidden items-center justify-center p-4 z-50 backdrop-blur-sm">
-    <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md p-6 border dark:border-slate-700">
-        <h3 class="text-lg font-bold text-slate-800 dark:text-white mb-4">Klub Szerkesztése</h3>
-        <form id="editClubForm" onsubmit="saveClubEdit(event)" class="space-y-4">
-            <input type="hidden" id="editClubId">
-            <div>
-                <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Klub Neve*</label>
-                <input type="text" id="editClubName" required class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-white rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none">
-            </div>
-            <div>
-                <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Cím*</label>
-                <input type="text" id="editClubAddress" required class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-white rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none">
-            </div>
-            <div class="flex gap-3 pt-4">
-                <button type="button" onclick="closeEditClubModal()" class="flex-1 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 py-2 rounded-lg font-bold transition-colors">Mégse</button>
-                <button type="submit" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg font-bold transition-colors">Mentés</button>
-            </div>
-        </form>
-    </div>
-</div>
-
+<script src="js/i18n.js"></script>
 <script src="js/utils.js"></script>
 <script src="js/clubs.js"></script>
 <script src="js/teams.js"></script>
