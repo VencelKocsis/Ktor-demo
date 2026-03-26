@@ -634,5 +634,95 @@ fun Route.matchRoutes(
                 call.respond(HttpStatusCode.BadRequest, e.message ?: "Hiba")
             }
         }
+
+        // --- KAPITÁNY: JÁTÉKOS MANUÁLIS HOZZÁADÁSA ---
+        post("/matches/{id}/participants") {
+            val matchId = call.parameters["id"]?.toIntOrNull()
+            val request = call.receiveNullable<AddParticipantDTO>()
+
+            if (matchId == null || request == null) {
+                return@post call.respond(HttpStatusCode.BadRequest, "Érvénytelen meccs ID vagy hiányzó adatok")
+            }
+
+            val principal = call.principal<UserIdPrincipal>() ?: return@post call.respond(HttpStatusCode.Unauthorized)
+            val firebaseUid = principal.name
+
+            try {
+                transaction(db) {
+                    // 1. Lekérjük a hívó (kapitány) belső ID-ját
+                    val callerId = Users.slice(Users.id)
+                        .select { Users.firebaseUid eq firebaseUid }
+                        .singleOrNull()?.get(Users.id)?.value
+                        ?: throw IllegalArgumentException("Felhasználó nem található")
+
+                    // 2. Lekérjük a meccset
+                    val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull()
+                        ?: throw IllegalArgumentException("Meccs nem található")
+
+                    if (matchRow[Matches.status] != "scheduled") {
+                        throw IllegalArgumentException("A meccs már elindult vagy befejeződött!")
+                    }
+
+                    val homeTeamId = matchRow[Matches.homeTeamId]
+                    val guestTeamId = matchRow[Matches.guestTeamId]
+
+                    // 3. JAVÍTVA: Megnézzük a TeamMembers táblát, hogy a hívó kapitány-e!
+                    val isHomeCaptain = TeamMembers.select {
+                        (TeamMembers.teamId eq homeTeamId) and
+                                (TeamMembers.userId eq callerId) and
+                                (TeamMembers.isCaptain eq true)
+                    }.count() > 0
+
+                    val isGuestCaptain = TeamMembers.select {
+                        (TeamMembers.teamId eq guestTeamId) and
+                                (TeamMembers.userId eq callerId) and
+                                (TeamMembers.isCaptain eq true)
+                    }.count() > 0
+
+                    val teamSide = when {
+                        isHomeCaptain -> "HOME"
+                        isGuestCaptain -> "GUEST"
+                        else -> throw IllegalArgumentException("Csak a csapatkapitány adhat hozzá játékost!")
+                    }
+
+                    // 4. Ellenőrizzük, hogy a célpont játékos tagja-e a csapatnak
+                    val targetTeamId = if (teamSide == "HOME") homeTeamId else guestTeamId
+                    val isMember = TeamMembers.select {
+                        (TeamMembers.teamId eq targetTeamId) and (TeamMembers.userId eq request.userId)
+                    }.count() > 0
+
+                    if (!isMember) {
+                        throw IllegalArgumentException("A játékos nem tagja a csapatodnak!")
+                    }
+
+                    // 5. Megnézzük, nincs-e már benne véletlenül a meccsben
+                    val alreadyExists = MatchParticipants.select {
+                        (MatchParticipants.matchId eq matchId) and (MatchParticipants.userId eq request.userId)
+                    }.count() > 0
+
+                    if (alreadyExists) {
+                        // Ha valamiért már benne volt, csak frissítjük a státuszát SELECTED-re
+                        MatchParticipants.update({ (MatchParticipants.matchId eq matchId) and (MatchParticipants.userId eq request.userId) }) {
+                            it[status] = "SELECTED"
+                        }
+                    } else {
+                        // 6. Beszúrjuk az új jelentkezést SELECTED státusszal
+                        MatchParticipants.insert {
+                            it[this.matchId] = matchId
+                            it[this.userId] = request.userId
+                            it[this.teamSide] = teamSide
+                            it[this.status] = "SELECTED"
+                        }
+                    }
+                }
+                call.respond(HttpStatusCode.OK, mapOf("message" to "Játékos sikeresen hozzáadva a kerethez!"))
+
+            } catch (e: IllegalArgumentException) {
+                // Saját, kontrollált hibáink (pl. nem ő a kapitány)
+                call.respond(HttpStatusCode.Forbidden, e.message ?: "Művelet megtagadva")
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, "Belső szerverhiba: ${e.message}")
+            }
+        }
     }
 }

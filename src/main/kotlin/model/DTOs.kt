@@ -112,6 +112,11 @@ data class ParticipantStatusUpdateDTO(
 )
 
 @Serializable
+data class AddParticipantDTO(
+    val userId: Int
+)
+
+@Serializable
 data class LineupSubmitDTO(
     val teamSide: String, // "HOME" vagy "GUEST"
     val positions: Map<Int, Int> // Map, ahol a Kulcs: pozíció(1-4), Érték: userId
