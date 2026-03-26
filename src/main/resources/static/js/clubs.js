@@ -7,7 +7,7 @@ async function fetchClubs() {
 
         const clubSelect = document.getElementById('teamClub');
         if (clubSelect) {
-            clubSelect.innerHTML = '<option value="">Válassz klubot...</option>';
+            clubSelect.innerHTML = `<option value="">${t('select_club')}</option>`;
             clubsDataCache.forEach(club => {
                 clubSelect.innerHTML += `<option value="${club.id}">${club.name}</option>`;
             });
@@ -17,7 +17,7 @@ async function fetchClubs() {
         if (container) {
             container.innerHTML = '';
             if (clubsDataCache.length === 0) {
-                container.innerHTML = '<div class="col-span-full text-center py-4 text-slate-500 dark:text-slate-400">Még nincsenek klubok.</div>';
+                container.innerHTML = `<div class="col-span-full text-center py-4 text-slate-500 dark:text-slate-400">${t('no_clubs')}</div>`;
                 return;
             }
 
@@ -28,7 +28,7 @@ async function fetchClubs() {
                             <h3 class="font-bold text-slate-800 dark:text-white">${club.name}</h3>
                             <p class="text-xs text-slate-500 dark:text-slate-400">${club.address}</p>
                         </div>
-                        <button onclick="openEditClub(${club.id})" class="text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 text-sm font-bold bg-emerald-50 dark:bg-emerald-900/30 px-3 py-1.5 rounded-md transition-colors">Módosít</button>
+                        <button onclick="openEditClub(${club.id})" class="text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 text-sm font-bold bg-emerald-50 dark:bg-emerald-900/30 px-3 py-1.5 rounded-md transition-colors">${t('edit')}</button>
                     </div>
                 `;
             });
@@ -94,7 +94,7 @@ async function saveClubEdit(event) {
         closeEditClubModal();
         showStatus('Klub frissítve!');
         fetchClubs();
-        fetchTeams(); // Csapatokat is frissítjük a névváltozás miatt
+        fetchTeams();
     } catch (error) {
         showStatus(error.message, true);
     }

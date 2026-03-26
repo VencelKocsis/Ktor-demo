@@ -1,7 +1,7 @@
 async function registerFCMToken() {
     const fcmStatusEl = document.getElementById('fcmStatus');
     if (!fcmStatusEl) return;
-    fcmStatusEl.textContent = 'Küldés...';
+    fcmStatusEl.textContent = t('sending');
     fcmStatusEl.className = 'text-sm font-semibold text-amber-500';
 
     try {
@@ -11,10 +11,10 @@ async function registerFCMToken() {
             body: JSON.stringify({ fcm_token: PLACEHOLDER_FCM_TOKEN })
         });
         if (!response.ok) throw new Error('Regisztrációs hiba');
-        fcmStatusEl.textContent = 'Sikeres Teszt (Mock Token)';
+        fcmStatusEl.textContent = t('fcm_success');
         fcmStatusEl.className = 'text-sm font-semibold text-emerald-600';
     } catch (error) {
-        fcmStatusEl.textContent = 'Hiba történt';
+        fcmStatusEl.textContent = t('fcm_error');
         fcmStatusEl.className = 'text-sm font-semibold text-rose-600';
     }
 }

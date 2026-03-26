@@ -42,7 +42,31 @@ const translations = {
 
         "ws_connecting": "WS Csatlakozás...",
         "ws_active": "WS Aktív",
-        "ws_disconnected": "WS Bontva"
+        "ws_disconnected": "WS Bontva",
+
+        // --- ÚJ: Dinamikus JS tartalmakhoz ---
+        "select_club": "Válassz klubot...",
+        "no_clubs": "Még nincsenek klubok.",
+        "edit": "Módosít",
+        "select_captain": "Kapitány kiválasztása...",
+        "loading_teams": "Csapatok betöltése...",
+        "no_teams": "Nincsenek regisztrált csapatok.",
+        "wins": "Győzelem",
+        "draws": "Döntetlen",
+        "losses": "Vereség",
+        "members": "Csapattagok",
+        "select_season": "Szezon kiválasztása...",
+        "home_team_ph": "Hazai csapat...",
+        "guest_team_ph": "Vendég csapat...",
+        "loading_matches": "Mérkőzések betöltése...",
+        "no_matches": "Nincsenek kiírt mérkőzések.",
+        "status_scheduled": "Kiírva",
+        "status_live": "Élő",
+        "status_finished": "Befejezve",
+        "round": "Kör",
+        "sending": "Küldés...",
+        "fcm_success": "Sikeres Teszt (Mock Token)",
+        "fcm_error": "Hiba történt"
     },
     en: {
         "title": "Club Administration",
@@ -84,48 +108,59 @@ const translations = {
 
         "ws_connecting": "WS Connecting...",
         "ws_active": "WS Active",
-        "ws_disconnected": "WS Disconnected"
+        "ws_disconnected": "WS Disconnected",
+
+        // --- NEW: For dynamic JS content ---
+        "select_club": "Select a club...",
+        "no_clubs": "No clubs yet.",
+        "edit": "Edit",
+        "select_captain": "Select captain...",
+        "loading_teams": "Loading teams...",
+        "no_teams": "No registered teams.",
+        "wins": "Wins",
+        "draws": "Draws",
+        "losses": "Losses",
+        "members": "Members",
+        "select_season": "Select season...",
+        "home_team_ph": "Home team...",
+        "guest_team_ph": "Guest team...",
+        "loading_matches": "Loading matches...",
+        "no_matches": "No scheduled matches.",
+        "status_scheduled": "Scheduled",
+        "status_live": "Live",
+        "status_finished": "Finished",
+        "round": "Round",
+        "sending": "Sending...",
+        "fcm_success": "Success (Mock Token)",
+        "fcm_error": "Error occurred"
     }
 };
 
-// ==========================================
-// I18N LOGIKA
-// ==========================================
 let currentLang = localStorage.getItem('lang') || 'hu';
 
 function setLanguage(lang) {
     currentLang = lang;
     localStorage.setItem('lang', lang);
 
-    // Gombok stílusának frissítése
     document.getElementById('lang-hu').classList.toggle('opacity-50', lang !== 'hu');
     document.getElementById('lang-en').classList.toggle('opacity-50', lang !== 'en');
 
-    // Végigmegyünk az összes data-i18n attribútummal rendelkező elemen
     document.querySelectorAll('[data-i18n]').forEach(element => {
         const key = element.getAttribute('data-i18n');
         if (translations[lang][key]) {
-            // Ha ez egy input placeholder, azt cseréljük
-            if (element.tagName === 'INPUT' && element.hasAttribute('placeholder')) {
-                // Ide most nem tettünk placeholdereket, de a jövőre nézve jó ha tudja
-            } else {
-                element.textContent = translations[lang][key];
-            }
+            element.textContent = translations[lang][key];
         }
     });
 
-    // Ha van külön JS-ből renderelt tartalom, azt is frissítjük
     if (typeof fetchClubs === 'function') fetchClubs();
     if (typeof fetchTeams === 'function') fetchTeams();
     if (typeof fetchMatches === 'function') fetchMatches();
 }
 
-// Fordító segédfüggvény a JS fájlokhoz (dinamikus HTML stringekhez)
 function t(key) {
     return translations[currentLang][key] || key;
 }
 
-// Betöltéskor alkalmazzuk a mentett nyelvet
 document.addEventListener('DOMContentLoaded', () => {
     setLanguage(currentLang);
 });

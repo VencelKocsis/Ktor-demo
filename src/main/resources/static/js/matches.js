@@ -6,7 +6,7 @@ async function fetchSeasons() {
 
         const seasonSelect = document.getElementById('matchSeason');
         if (seasonSelect) {
-            seasonSelect.innerHTML = '<option value="">Szezon kiválasztása...</option>';
+            seasonSelect.innerHTML = `<option value="">${t('select_season')}</option>`;
             seasons.forEach(s => {
                 const selected = s.isActive ? 'selected' : '';
                 seasonSelect.innerHTML += `<option value="${s.id}" ${selected}>${s.name}</option>`;
@@ -22,8 +22,8 @@ function updateMatchTeamDropdowns() {
     const guestSelect = document.getElementById('matchGuestTeam');
 
     if (homeSelect && guestSelect && teamsDataCache.length > 0) {
-        homeSelect.innerHTML = '<option value="">Hazai csapat...</option>';
-        guestSelect.innerHTML = '<option value="">Vendég csapat...</option>';
+        homeSelect.innerHTML = `<option value="">${t('home_team_ph')}</option>`;
+        guestSelect.innerHTML = `<option value="">${t('guest_team_ph')}</option>`;
 
         teamsDataCache.forEach(team => {
             homeSelect.innerHTML += `<option value="${team.teamId}">${team.teamName}</option>`;
@@ -35,7 +35,7 @@ function updateMatchTeamDropdowns() {
 async function fetchMatches() {
     const container = document.getElementById('matchesContainer');
     if (!container) return;
-    container.innerHTML = '<div class="text-center py-4 text-slate-500">Mérkőzések betöltése...</div>';
+    container.innerHTML = `<div class="text-center py-4 text-slate-500">${t('loading_matches')}</div>`;
 
     try {
         const response = await fetch(MATCHES_API_URL);
@@ -44,15 +44,15 @@ async function fetchMatches() {
 
         container.innerHTML = '';
         if (matches.length === 0) {
-            container.innerHTML = '<div class="text-center py-4 text-slate-500">Nincsenek kiírt mérkőzések.</div>';
+            container.innerHTML = `<div class="text-center py-4 text-slate-500">${t('no_matches')}</div>`;
             return;
         }
 
         matches.sort((a, b) => b.id - a.id).forEach(match => {
             let statusBadge = '';
-            if (match.status === 'scheduled') statusBadge = '<span class="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-1 rounded">Kiírva</span>';
-            else if (match.status === 'in_progress') statusBadge = '<span class="bg-amber-100 text-amber-800 text-xs font-bold px-2 py-1 rounded">Élő</span>';
-            else statusBadge = '<span class="bg-emerald-100 text-emerald-800 text-xs font-bold px-2 py-1 rounded">Befejezve</span>';
+            if (match.status === 'scheduled') statusBadge = `<span class="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-1 rounded">${t('status_scheduled')}</span>`;
+            else if (match.status === 'in_progress') statusBadge = `<span class="bg-amber-100 text-amber-800 text-xs font-bold px-2 py-1 rounded">${t('status_live')}</span>`;
+            else statusBadge = `<span class="bg-emerald-100 text-emerald-800 text-xs font-bold px-2 py-1 rounded">${t('status_finished')}</span>`;
 
             const dateObj = new Date(match.date);
             const formattedDate = dateObj.toLocaleString('hu-HU', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit' });
@@ -61,7 +61,7 @@ async function fetchMatches() {
                 <div class="bg-slate-50 dark:bg-slate-700 rounded-xl border border-slate-200 dark:border-slate-600 p-4 flex justify-between items-center">
                     <div>
                         <div class="flex items-center gap-2 mb-1">
-                            <span class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">${match.roundNumber}. Kör</span>
+                            <span class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">${match.roundNumber}. ${t('round')}</span>
                             ${statusBadge}
                         </div>
                         <h3 class="text-lg font-bold text-slate-800 dark:text-white">
