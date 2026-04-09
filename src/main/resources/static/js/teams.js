@@ -105,9 +105,29 @@ async function addTeam(event) {
 function openEditTeam(id) {
     const team = teamsDataCache.find(t => t.teamId === id);
     if (!team) return;
+
     document.getElementById('editTeamId').value = team.teamId;
     document.getElementById('editTeamName').value = team.teamName;
     document.getElementById('editTeamDivision').value = team.division || '';
+
+    // Legeneráljuk a tag checkboxokat
+    const container = document.getElementById('editTeamMembersContainer');
+    container.innerHTML = '';
+    const capSelect = document.getElementById('editTeamCaptain');
+    capSelect.innerHTML = '';
+
+    playersData.forEach(p => {
+        const isMember = team.members.some(m => m.userId === p.userId);
+        const isCaptain = team.members.some(m => m.userId === p.userId && m.isCaptain);
+
+        container.innerHTML += `
+            <label class="flex items-center gap-2 cursor-pointer dark:text-white text-sm">
+                <input type="checkbox" name="editTeamMembers" value="${p.userId}" ${isMember ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded">
+                ${p.name}
+            </label>
+        `;
+        capSelect.innerHTML += `<option value="${p.userId}" ${isCaptain ? 'selected' : ''}>${p.name}</option>`;
+    });
 
     const modal = document.getElementById('editTeamModal');
     modal.classList.remove('hidden');
