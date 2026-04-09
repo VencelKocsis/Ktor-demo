@@ -60,6 +60,45 @@ fun Route.authRoutes(db: Database) {
             }
         }
 
+        // --- EGY ADOTT FELHASZNÁLÓ LEKÉRDEZÉSE UID ALAPJÁN (Publikus profilhoz) ---
+        get("/users/{uid}") {
+            // 1. Kinyerjük az URL-ből az UID paramétert
+            val targetUid = call.parameters["uid"]
+            if (targetUid == null) {
+                call.respond(HttpStatusCode.BadRequest, "Hiányzó UID paraméter")
+                return@get
+            }
+
+            try {
+                // 2. Keresés az adatbázisban a firebaseUid alapján
+                val user = transaction(db) {
+                    val row = Users.select { Users.firebaseUid eq targetUid }.singleOrNull()
+
+                    if (row != null) {
+                        UserDTO(
+                            id = row[Users.id].value,
+                            email = row[Users.email],
+                            firstName = row[Users.firstName],
+                            lastName = row[Users.lastName]
+                        )
+                    } else {
+                        null
+                    }
+                }
+
+                // 3. Válasz küldése
+                if (user != null) {
+                    call.respond(HttpStatusCode.OK, user)
+                } else {
+                    call.respond(HttpStatusCode.NotFound, "Felhasználó nem található")
+                }
+
+            } catch (e: Exception) {
+                appLog.error("Hiba a profil lekérésekor (UID: $targetUid): ${e.message}")
+                call.respond(HttpStatusCode.InternalServerError, "Szerver hiba történt")
+            }
+        }
+
         // --- AUTH SYNC ---
         post("/auth/sync") {
             val principal = call.principal<UserIdPrincipal>()
