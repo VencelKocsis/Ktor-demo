@@ -79,6 +79,17 @@ fun Route.clubAndTeamRoutes(db: Database) {
         }
     }
 
+    // --- KLUB TÖRLÉSE ---
+    delete("/clubs/{id}") {
+        val clubId = call.parameters["id"]?.toIntOrNull() ?: return@delete call.respond(HttpStatusCode.BadRequest)
+        try {
+            transaction(db) { Clubs.deleteWhere { Clubs.id eq clubId } }
+            call.respond(HttpStatusCode.OK, mapOf("status" to "deleted"))
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.Conflict, "Nem törölhető! Töröld előbb a klubhoz tartozó csapatokat.")
+        }
+    }
+
     // --- CSAPATOK LEKÉRDEZÉSE ---
     get("/teams") {
         try {
@@ -164,17 +175,50 @@ fun Route.clubAndTeamRoutes(db: Database) {
         }
     }
 
-    // --- CSAPAT MÓDOSÍTÁSA ---
+    // --- CSAPAT MÓDOSÍTÁSA (Név, Divízió, Tagok, Kapitány) ---
     put("/teams/{id}") {
         val teamId = call.parameters["id"]?.toIntOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest, "Érvénytelen csapat ID")
-        val updateData = call.receive<TeamUpdateDTO>()
-        val rowsAffected = transaction(db) {
-            Teams.update({ Teams.id eq teamId }) {
-                it[name] = updateData.name
-                it[division] = if (updateData.division.isNullOrBlank()) null else updateData.division
+        try {
+            val updateData = call.receive<TeamUpdateDTO>()
+
+            transaction(db) {
+                // 1. Alapadatok frissítése
+                Teams.update({ Teams.id eq teamId }) {
+                    it[name] = updateData.name
+                    it[division] = if (updateData.division.isNullOrBlank()) null else updateData.division
+                }
+                // 2. Tagok frissítése (Törlünk mindenkit, majd felvesszük a kiválasztottakat)
+                TeamMembers.deleteWhere { TeamMembers.teamId eq teamId }
+
+                updateData.memberIds.forEach { uId ->
+                    TeamMembers.insert {
+                        it[this.teamId] = teamId
+                        it[userId] = uId
+                        it[isCaptain] = (uId == updateData.captainUserId) // A kapitányt is itt állítjuk be!
+                        it[joinedAt] = LocalDate.now()
+                    }
+                }
             }
+            call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.BadRequest, "Hiba a frissítésnél: ${e.message}")
         }
-        if (rowsAffected > 0) call.respond(HttpStatusCode.OK, mapOf("status" to "updated")) else call.respond(HttpStatusCode.NotFound, "Csapat nem található")
+    }
+
+    // --- CSAPAT TÖRLÉSE ---
+    delete("/teams/{id}") {
+        val teamId = call.parameters["id"]?.toIntOrNull() ?: return@delete call.respond(HttpStatusCode.BadRequest)
+        try {
+            transaction(db) {
+                // Először a tagokat kell törölni (Foreign Key megszorítás miatt)
+                TeamMembers.deleteWhere { TeamMembers.teamId eq teamId }
+                // Majd a csapatot
+                Teams.deleteWhere { Teams.id eq teamId }
+            }
+            call.respond(HttpStatusCode.OK, mapOf("status" to "deleted"))
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.Conflict, "Nem törölhető! Töröld előbb a csapathoz tartozó meccseket.")
+        }
     }
 
     // ==========================================

@@ -23,7 +23,9 @@ data class TeamCreateDTO(
 @Serializable
 data class TeamUpdateDTO(
     val name: String,
-    val division: String? = null
+    val division: String? = null,
+    val captainUserId: Int,
+    val memberIds: List<Int>
 )
 
 @Serializable

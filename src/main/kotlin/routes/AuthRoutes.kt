@@ -35,30 +35,30 @@ fun Route.authRoutes(db: Database) {
         call.respond(HttpStatusCode.OK, availableUsers)
     }
 
+    // --- MINDEN FELHASZNÁLÓ LEKÉRDEZÉSE (A legördülő menühöz és szerkesztéshez) ---
+    get("/users") {
+        try {
+            val allUsers = transaction(db) {
+                Users.selectAll().map { row ->
+                    MemberDTO(
+                        userId = row[Users.id].value,
+                        firebaseUid = row[Users.firebaseUid],
+                        name = "${row[Users.lastName]} ${row[Users.firstName]}",
+                        isCaptain = false
+                    )
+                }
+            }
+            call.respond(HttpStatusCode.OK, allUsers)
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, "Adatbázis hiba")
+        }
+    }
+
     // ==========================================
     // VÉDETT VÉGPONTOK (Mobil applikációhoz)
     // ==========================================
 
     authenticate("firebase-auth") {
-
-        // --- MINDEN FELHASZNÁLÓ LEKÉRDEZÉSE (A legördülő menühöz) ---
-        get("/users") {
-            try {
-                val allUsers = transaction(db) {
-                    Users.selectAll().map { row ->
-                        MemberDTO(
-                            userId = row[Users.id].value,
-                            firebaseUid = row[Users.firebaseUid],
-                            name = "${row[Users.lastName]} ${row[Users.firstName]}",
-                            isCaptain = false
-                        )
-                    }
-                }
-                call.respond(HttpStatusCode.OK, allUsers)
-            } catch (e: Exception) {
-                call.respond(HttpStatusCode.InternalServerError, "Adatbázis hiba")
-            }
-        }
 
         // --- EGY ADOTT FELHASZNÁLÓ LEKÉRDEZÉSE UID ALAPJÁN (Publikus profilhoz) ---
         get("/users/{uid}") {
