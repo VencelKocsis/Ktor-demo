@@ -9,6 +9,7 @@ import hu.bme.aut.android.demo.database.tables.TeamMembers
 import hu.bme.aut.android.demo.database.tables.Teams
 import hu.bme.aut.android.demo.database.tables.Users
 import hu.bme.aut.android.demo.model.*
+import hu.bme.aut.android.demo.service.FirebaseService
 import hu.bme.aut.android.demo.service.FirebaseService.sendNotification
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -327,10 +328,18 @@ fun Route.matchRoutes(
                     call.respond(HttpStatusCode.Forbidden, "Hiba az indításkor: nincs jogosultság vagy nem található a meccs.")
                 } else {
                     call.respond(HttpStatusCode.OK, mapOf("status" to "finalized"))
+
                     applicationScope.launch {
                         val (players, title) = notificationData
                         players.forEach { (email, token) ->
-                            sendNotification(db, email, token, "A mérkőzés elindult! 🏁", "A $title meccs hivatalosan megkezdődött.")
+                            FirebaseService.sendNotification(
+                                db = db,
+                                email = email,
+                                token = token,
+                                title = "A mérkőzés elindult! \uD83C\udFC1",
+                                body = "A $title meccs hivatalosan megkezdődött.",
+                                dataPayload = mapOf("matchId" to matchId.toString())
+                            )
                         }
                     }
                 }

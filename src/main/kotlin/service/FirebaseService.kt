@@ -40,20 +40,28 @@ object FirebaseService {
     }
 
     // Ez az a függvény, amit a NotificationRoutes keres!
-    fun sendNotification(db: Database, email: String, token: String, title: String, body: String) {
+    fun sendNotification(
+        db: Database,
+        email: String,
+        token: String,
+        title: String,
+        body: String,
+        dataPayload: Map<String, String> = emptyMap()
+    ) {
         if (FirebaseApp.getApps().isEmpty()) {
             appLog.warn("Firebase nincs inicializálva, nem küldhető FCM.")
             return
         }
 
-        // Elindítjuk a küldést a háttérben
         serviceScope.launch {
             try {
                 val message = Message.builder()
                     .setToken(token)
                     .setNotification(
                         Notification.builder().setTitle(title).setBody(body).build()
-                    ).build()
+                    )
+                    .putAllData(dataPayload)
+                    .build()
 
                 appLog.info("🚀 FCM üzenet küldése indult. Cím: '$title' (Cél: $email)")
                 val response = FirebaseMessaging.getInstance().send(message)
