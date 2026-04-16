@@ -282,46 +282,51 @@ fun Route.matchRoutes(
                     val captainUserId = userRow[Users.id]
                     val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull() ?: return@transaction null
 
+                    // 1. Jogosultság ellenőrzése
                     val isHomeCap = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.homeTeamId]) and (TeamMembers.userId eq captainUserId) and (TeamMembers.isCaptain eq true) }.count() > 0
                     val isGuestCap = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.guestTeamId]) and (TeamMembers.userId eq captainUserId) and (TeamMembers.isCaptain eq true) }.count() > 0
 
                     if (!isHomeCap && !isGuestCap) return@transaction null
 
+                    // 2. Mindkét csapat létszámának ellenőrzése
                     val homeSelectedCount = MatchParticipants.select {
-                        (MatchParticipants.matchId eq matchId) and (MatchParticipants.teamSide eq "HOME") and (MatchParticipants.status eq "SELECTED")
+                        (MatchParticipants.matchId eq matchId) and
+                                (MatchParticipants.teamSide eq "HOME") and
+                                (MatchParticipants.status eq "SELECTED")
                     }.count()
 
                     val guestSelectedCount = MatchParticipants.select {
-                        (MatchParticipants.matchId eq matchId) and (MatchParticipants.teamSide eq "GUEST") and (MatchParticipants.status eq "SELECTED")
+                        (MatchParticipants.matchId eq matchId) and
+                                (MatchParticipants.teamSide eq "GUEST") and
+                                (MatchParticipants.status eq "SELECTED")
                     }.count()
 
                     if (homeSelectedCount < 4 || guestSelectedCount < 4) {
                         throw IllegalArgumentException("Mindkét csapatból legalább 4 játékos kiválasztása szükséges a meccs indításához!")
                     }
 
-                    // 3. Meccs elindítása ÉS a játékosok VÉGLEGESÍTÉSE (LOCKED)
+                    // 3. Meccs elindítása és LOCKED státuszok beállítása
                     Matches.update({ Matches.id eq matchId }) { it[status] = "in_progress" }
+
                     MatchParticipants.update({
                         (MatchParticipants.matchId eq matchId) and (MatchParticipants.status eq "SELECTED")
                     }) {
                         it[status] = "LOCKED"
                     }
 
-                    // 4. Értesítendők kigyűjtése (Már a LOCKED státuszúakat keressük!)
+                    // 4. Értesítendők kigyűjtése (A kapitányt most már BENT HAGYJUK a listában!)
                     val tokensWithEmails = (MatchParticipants innerJoin Users innerJoin FcmTokens)
                         .slice(Users.email, FcmTokens.token)
                         .select {
                             (MatchParticipants.matchId eq matchId) and
-                                    (MatchParticipants.status eq "LOCKED") and
-                                    (MatchParticipants.userId neq captainUserId)
+                                    (MatchParticipants.status eq "LOCKED")
                         }
                         .map { Pair(it[Users.email], it[FcmTokens.token]) }
 
                     val homeTeamName = Teams.select { Teams.id eq matchRow[Matches.homeTeamId] }.single()[Teams.name]
                     val guestTeamName = Teams.select { Teams.id eq matchRow[Matches.guestTeamId] }.single()[Teams.name]
 
-                    // Visszatérünk a nevekkel külön-külön
-                    Triple(tokensWithEmails, homeTeamName, guestTeamName)
+                    Pair(tokensWithEmails, "$homeTeamName vs $guestTeamName")
                 }
 
                 if (notificationData == null) {
@@ -330,9 +335,8 @@ fun Route.matchRoutes(
                     call.respond(HttpStatusCode.OK, mapOf("status" to "finalized"))
 
                     applicationScope.launch {
-                        val (players, homeTeam, guestTeam) = notificationData
+                        val (players, title) = notificationData
                         players.forEach { (email, token) ->
-                            // CSAK DATA PAYLOAD, NINCS TITLE ÉS BODY!
                             FirebaseService.sendNotification(
                                 db = db,
                                 email = email,
@@ -340,16 +344,18 @@ fun Route.matchRoutes(
                                 dataPayload = mapOf(
                                     "type" to "MATCH_STARTED",
                                     "matchId" to matchId.toString(),
-                                    "homeTeam" to homeTeam,
-                                    "guestTeam" to guestTeam
+                                    "homeTeam" to title.split(" vs ")[0],  // A "$homeName vs $guestName" string felbontása
+                                    "guestTeam" to title.split(" vs ")[1]
                                 )
                             )
                         }
                     }
                 }
             } catch (e: IllegalArgumentException) {
+                appLog.warn("Sikertelen indítási kísérlet: ${e.message}")
                 call.respond(HttpStatusCode.BadRequest, e.message ?: "Hiányzó játékosok.")
             } catch (e: Exception) {
+                appLog.error("Hiba a véglegesítésnél: ${e.message}", e)
                 call.respond(HttpStatusCode.InternalServerError, "Szerver oldali hiba: ${e.message}")
             }
         }
