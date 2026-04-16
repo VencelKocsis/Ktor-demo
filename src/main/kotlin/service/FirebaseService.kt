@@ -5,7 +5,6 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.Message
-import com.google.firebase.messaging.Notification
 import kotlinx.coroutines.*
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.deleteWhere
@@ -22,7 +21,7 @@ object FirebaseService {
     // és ne várakoztassák meg a HTTP válaszokat (pl. a meccs indításakor)
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // Ezt majd az Application.kt-ból hívjuk meg induláskor
+    // Application.kt-ból hívjuk meg induláskor
     fun init() {
         val firebaseServiceAccountKey = System.getenv("FIREBASE_SERVICE_ACCOUNT_KEY")
         if (!firebaseServiceAccountKey.isNullOrBlank()) {
@@ -39,14 +38,12 @@ object FirebaseService {
         }
     }
 
-    // Ez az a függvény, amit a NotificationRoutes keres!
+    // Ez az a függvény, amit a NotificationRoutes keres
     fun sendNotification(
         db: Database,
         email: String,
         token: String,
-        title: String,
-        body: String,
-        dataPayload: Map<String, String> = emptyMap()
+        dataPayload: Map<String, String>
     ) {
         if (FirebaseApp.getApps().isEmpty()) {
             appLog.warn("Firebase nincs inicializálva, nem küldhető FCM.")
@@ -57,25 +54,17 @@ object FirebaseService {
             try {
                 val message = Message.builder()
                     .setToken(token)
-                    .setNotification(
-                        Notification.builder().setTitle(title).setBody(body).build()
-                    )
                     .putAllData(dataPayload)
                     .build()
 
-                appLog.info("🚀 FCM üzenet küldése indult. Cím: '$title' (Cél: $email)")
+                appLog.info("🚀 FCM (Data-only) üzenet küldése indult. (Cél: $email)")
                 val response = FirebaseMessaging.getInstance().send(message)
                 appLog.info("✅ FCM üzenet elküldve: $response")
 
             } catch (e: Exception) {
                 appLog.error("❌ FCM küldési hiba: ${e.message}")
-
-                // Ha a token már nem él (letörölte az appot, stb.), kitöröljük az adatbázisból
                 if (e.message?.contains("Requested entity was not found") == true || e.message?.contains("UNREGISTERED") == true) {
-                    appLog.info("🧹 Halott token észlelve! Törlés az adatbázisból...")
-                    transaction(db) {
-                        FcmTokens.deleteWhere { FcmTokens.token eq token }
-                    }
+                    transaction(db) { FcmTokens.deleteWhere { FcmTokens.token eq token } }
                 }
             }
         }

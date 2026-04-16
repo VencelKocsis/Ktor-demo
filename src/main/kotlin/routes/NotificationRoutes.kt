@@ -15,6 +15,7 @@ import org.jetbrains.exposed.sql.transactions.transaction
 
 fun Route.notificationRoutes(db: Database) {
 
+    // --- MANUÁLIS TESZT VÉGPONT ---
     post("/send_fcm_notification") {
         val request = call.receive<SendNotificationRequest>()
         val notificationData = transaction(db) {
@@ -23,12 +24,22 @@ fun Route.notificationRoutes(db: Database) {
                 .select { Users.email eq request.targetEmail }
                 .singleOrNull()?.get(FcmTokens.token)
         }
+
         if (notificationData == null) {
             call.respond(HttpStatusCode.NotFound, "Nincs token ehhez az e-mailhez.")
             return@post
         }
 
-        FirebaseService.sendNotification(db, request.targetEmail, notificationData, request.title, request.body)
+        FirebaseService.sendNotification(
+            db = db,
+            email = request.targetEmail,
+            token = notificationData,
+            dataPayload = mapOf(
+                "type" to "MANUAL_TEST",
+                "title" to request.title,
+                "body" to request.body
+            )
+        )
 
         call.respond(HttpStatusCode.OK, mapOf("status" to "sent"))
     }
