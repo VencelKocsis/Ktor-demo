@@ -113,13 +113,16 @@ function openEditTeam(id) {
     document.getElementById('editTeamName').value = team.teamName;
     document.getElementById('editTeamDivision').value = team.division || '';
 
-    // Legeneráljuk a tag checkboxokat
     const container = document.getElementById('editTeamMembersContainer');
     container.innerHTML = '';
     const capSelect = document.getElementById('editTeamCaptain');
     capSelect.innerHTML = '';
 
-    playersData.forEach(p => {
+    // Varázslat: Összekombináljuk a jelenlegi tagokat és a szabad játékosokat!
+    const combinedPlayers = [...team.members, ...playersData];
+
+    combinedPlayers.forEach(p => {
+        // Ellenőrizzük, hogy a játékos az aktuális csapat tagja-e / kapitánya-e
         const isMember = team.members.some(m => m.userId === p.userId);
         const isCaptain = team.members.some(m => m.userId === p.userId && m.isCaptain);
 
@@ -137,20 +140,32 @@ function openEditTeam(id) {
     modal.classList.add('flex');
 }
 
-function closeEditTeamModal() {
-    const modal = document.getElementById('editTeamModal');
-    modal.classList.add('hidden');
-    modal.classList.remove('flex');
-}
-
 async function saveTeamEdit(event) {
     event.preventDefault();
     const id = document.getElementById('editTeamId').value;
     const divisionVal = document.getElementById('editTeamDivision').value.trim();
+
+    // 1. Összegyűjtjük a bepipált játékosokat a checkboxokból
+    const selectedCheckboxes = document.querySelectorAll('input[name="editTeamMembers"]:checked');
+    const memberIds = Array.from(selectedCheckboxes).map(cb => parseInt(cb.value, 10));
+
+    // 2. Kinyerjük a kiválasztott kapitányt
+    const captainUserId = parseInt(document.getElementById('editTeamCaptain').value, 10);
+
+    // Biztonsági ellenőrzés: a kapitánynak tagnak is kell lennie!
+    if (!memberIds.includes(captainUserId)) {
+        showStatus("A kiválasztott csapatkapitánynak csapattagnak (bepipálva) is kell lennie!", true);
+        return;
+    }
+
+    // 3. Felépítjük a teljes DTO-t a Ktor backendnek
     const updateData = {
         name: document.getElementById('editTeamName').value.trim(),
-        division: divisionVal.length > 0 ? divisionVal : null
+        division: divisionVal.length > 0 ? divisionVal : null,
+        captainUserId: captainUserId,  // Ezt is küldjük!
+        memberIds: memberIds           // És a tagokat is küldjük!
     };
+
     try {
         const response = await fetch(`${TEAMS_API_URL}/${id}`, {
             method: 'PUT',
@@ -158,12 +173,22 @@ async function saveTeamEdit(event) {
             body: JSON.stringify(updateData)
         });
         if (!response.ok) throw new Error('Hiba a frissítésnél');
+
         closeEditTeamModal();
         showStatus('Csapat frissítve!');
+
+        // Frissítjük a nézeteket
         fetchTeams();
+        fetchPlayers();
     } catch (error) {
         showStatus(error.message, true);
     }
+}
+
+function closeEditTeamModal() {
+    const modal = document.getElementById('editTeamModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
 }
 
 async function deleteTeam(id) {
