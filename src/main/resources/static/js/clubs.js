@@ -79,11 +79,18 @@ function closeEditClubModal() {
 
 async function saveClubEdit(event) {
     event.preventDefault();
+
     const id = document.getElementById('editClubId').value;
     const updateData = {
         name: document.getElementById('editClubName').value.trim(),
         address: document.getElementById('editClubAddress').value.trim()
     };
+
+    if (!id) {
+        showStatus('Hiba: Hiányzó klub ID! (Ellenőrizd a HTML-t)', true);
+        return;
+    }
+
     try {
         const response = await fetch(`${CLUBS_API_URL}/${id}`, {
             method: 'PUT',
@@ -91,10 +98,12 @@ async function saveClubEdit(event) {
             body: JSON.stringify(updateData)
         });
         if (!response.ok) throw new Error('Hiba a frissítésnél');
+
         closeEditClubModal();
         showStatus('Klub frissítve!');
         fetchClubs();
-        fetchTeams();
+
+        if (typeof fetchTeams === 'function') fetchTeams();
     } catch (error) {
         showStatus(error.message, true);
     }
