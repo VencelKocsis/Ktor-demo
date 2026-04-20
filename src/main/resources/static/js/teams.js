@@ -36,7 +36,10 @@ async function fetchTeams() {
         teamsDataCache.forEach(team => {
             container.innerHTML += `
                 <div class="bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:shadow-md transition-all relative">
-                    <button onclick="openEditTeam(${team.teamId})" class="absolute top-4 right-4 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 text-sm font-bold bg-indigo-100 dark:bg-indigo-900/30 px-3 py-1 rounded-md transition-colors">${t('edit')}</button>
+                    <div class="absolute top-4 right-4 flex gap-2">
+                        <button onclick="openEditTeam(${team.teamId})" class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 text-sm font-bold bg-indigo-100 dark:bg-indigo-900/30 px-3 py-1 rounded-md transition-colors">${t('edit')}</button>
+                        <button onclick="deleteTeam(${team.teamId})" class="text-rose-600 dark:text-rose-400 hover:text-rose-800 dark:hover:text-rose-300 text-sm font-bold bg-rose-100 dark:bg-rose-900/30 px-3 py-1 rounded-md transition-colors">Törlés</button>
+                    </div>
                     <div class="flex justify-between items-start mb-4 pr-20">
                         <div>
                             <h3 class="text-xl font-extrabold text-slate-800 dark:text-white">${team.teamName}</h3>
@@ -157,6 +160,21 @@ async function saveTeamEdit(event) {
         if (!response.ok) throw new Error('Hiba a frissítésnél');
         closeEditTeamModal();
         showStatus('Csapat frissítve!');
+        fetchTeams();
+    } catch (error) {
+        showStatus(error.message, true);
+    }
+}
+
+async function deleteTeam(id) {
+    if (!confirm("Biztosan törölni szeretnéd ezt a csapatot? (A hozzá tartozó meccseket előbb törölni kell!)")) return;
+    try {
+        const response = await fetch(`${TEAMS_API_URL}/${id}`, { method: 'DELETE' });
+        if (!response.ok) {
+            const text = await response.text();
+            throw new Error(text || 'Hiba a törlésnél');
+        }
+        showStatus('Csapat sikeresen törölve!');
         fetchTeams();
     } catch (error) {
         showStatus(error.message, true);

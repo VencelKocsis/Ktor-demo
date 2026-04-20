@@ -117,6 +117,21 @@ fun Route.matchRoutes(
         }
     }
 
+    // --- MÉRKŐZÉS TÖRLÉSE ---
+    delete("/matches/{id}") {
+        val matchId = call.parameters["id"]?.toIntOrNull() ?: return@delete call.respond(HttpStatusCode.BadRequest)
+        try {
+            transaction(db) {
+                IndividualMatches.deleteWhere { IndividualMatches.matchId eq matchId }
+                MatchParticipants.deleteWhere { MatchParticipants.matchId eq matchId }
+                Matches.deleteWhere { Matches.id eq matchId }
+            }
+            call.respond(HttpStatusCode.OK, mapOf("status" to "deleted"))
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.Conflict, "Hiba a törlésnél: ${e.message}")
+        }
+    }
+
     // --- MÉRKŐZÉS LÉTREHOZÁSA ---
     post("/matches") {
         try {
