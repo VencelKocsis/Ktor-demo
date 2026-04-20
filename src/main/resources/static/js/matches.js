@@ -91,10 +91,10 @@ async function addMatch(event) {
     const roundNumber = document.getElementById('matchRound').value;
     const homeTeamId = document.getElementById('matchHomeTeam').value;
     const guestTeamId = document.getElementById('matchGuestTeam').value;
+
     const rawMatchDate = document.getElementById('matchDate').value;
     const location = document.getElementById('matchLocation').value.trim();
 
-    // 1. Szigorú ellenőrzés: Ne küldjünk félig üres űrlapot a backendnek
     if (!seasonId || !roundNumber || !homeTeamId || !guestTeamId || !rawMatchDate || !location) {
         showStatus("Minden mező kitöltése kötelező!", true);
         return;
@@ -105,25 +105,12 @@ async function addMatch(event) {
         return;
     }
 
-    // 2. Dátum szabványosítása (ISO-8601 formátum) a Ktor backend számára
-    let formattedDate = rawMatchDate;
-    try {
-        const d = new Date(rawMatchDate);
-        if (!isNaN(d.getTime())) {
-            const pad = (n) => n.toString().padStart(2, '0');
-            // Ebből: "04/20/2026 11:10 PM" -> Ez lesz: "2026-04-20T23:10:00"
-            formattedDate = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
-        }
-    } catch (e) {
-        console.error("Dátum formázási hiba:", e);
-    }
-
     const newMatchData = {
         seasonId: parseInt(seasonId, 10),
         roundNumber: parseInt(roundNumber, 10),
         homeTeamId: parseInt(homeTeamId, 10),
         guestTeamId: parseInt(guestTeamId, 10),
-        matchDate: formattedDate,
+        matchDate: rawMatchDate,
         location: location
     };
 
@@ -134,12 +121,15 @@ async function addMatch(event) {
             body: JSON.stringify(newMatchData)
         });
 
-        if (!response.ok) throw new Error(await response.text() || `Hiba: ${response.status}`);
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || `Hiba: ${response.status}`);
+        }
 
         document.getElementById('addMatchForm').reset();
         showStatus('Mérkőzés sikeresen kiírva!');
         fetchMatches();
     } catch (error) {
-        showStatus(error.message, true);
+        showStatus("Ktor Backend hiba: " + error.message, true);
     }
 }
