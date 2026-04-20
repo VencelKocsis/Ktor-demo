@@ -10,7 +10,6 @@ import hu.bme.aut.android.demo.database.tables.Teams
 import hu.bme.aut.android.demo.database.tables.Users
 import hu.bme.aut.android.demo.model.*
 import hu.bme.aut.android.demo.service.FirebaseService
-import hu.bme.aut.android.demo.service.FirebaseService.sendNotification
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.auth.UserIdPrincipal
@@ -58,6 +57,9 @@ fun Route.matchRoutes(
                     val homeName = Teams.select { Teams.id eq homeTeamEntityId }.single()[Teams.name]
                     val guestName = Teams.select { Teams.id eq guestTeamEntityId }.single()[Teams.name]
 
+                    val sId = matchRow[Matches.seasonId].value
+                    val seasonNameStr = Seasons.select { Seasons.id eq sId }.single()[Seasons.name]
+
                     val individualMatches = IndividualMatches.select { IndividualMatches.matchId eq mId }.map { imRow ->
                         val homeUserRow = Users.select { Users.id eq imRow[IndividualMatches.homePlayerId] }.single()
                         val guestUserRow = Users.select { Users.id eq imRow[IndividualMatches.guestPlayerId] }.single()
@@ -89,6 +91,8 @@ fun Route.matchRoutes(
 
                     MatchDTO(
                         id = matchRow[Matches.id].value,
+                        seasonId = sId,
+                        seasonName = seasonNameStr,
                         roundNumber = matchRow[Matches.roundNumber] ?: 0,
                         homeTeamName = homeName,
                         guestTeamName = guestName,

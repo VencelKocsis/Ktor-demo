@@ -92,6 +92,8 @@ data class MemberDTO(
 @Serializable
 data class MatchDTO(
     val id: Int,
+    val seasonId: Int,
+    val seasonName: String,
     val roundNumber: Int,
     val homeTeamName: String,
     val guestTeamName: String,
