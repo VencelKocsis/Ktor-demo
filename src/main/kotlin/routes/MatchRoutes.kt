@@ -289,96 +289,6 @@ fun Route.matchRoutes(
             call.respond(result.first, result.second)
         }
 
-        // --- KAPITÁNYI VÉGLEGESÍTÉS / INDÍTÁS ---
-        post("/matches/{matchId}/finalize") {
-            val principal = call.principal<UserIdPrincipal>()
-            val firebaseUid = principal?.name ?: return@post call.respond(HttpStatusCode.Unauthorized)
-            val matchId = call.parameters["matchId"]?.toIntOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, "Invalid Match ID")
-
-            try {
-                val notificationData = transaction(db) {
-                    val userRow = Users.select { Users.firebaseUid eq firebaseUid }.singleOrNull() ?: return@transaction null
-                    val captainUserId = userRow[Users.id]
-                    val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull() ?: return@transaction null
-
-                    // 1. Jogosultság ellenőrzése
-                    val isHomeCap = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.homeTeamId]) and (TeamMembers.userId eq captainUserId) and (TeamMembers.isCaptain eq true) }.count() > 0
-                    val isGuestCap = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.guestTeamId]) and (TeamMembers.userId eq captainUserId) and (TeamMembers.isCaptain eq true) }.count() > 0
-
-                    if (!isHomeCap && !isGuestCap) return@transaction null
-
-                    // 2. Mindkét csapat létszámának ellenőrzése
-                    val homeSelectedCount = MatchParticipants.select {
-                        (MatchParticipants.matchId eq matchId) and
-                                (MatchParticipants.teamSide eq "HOME") and
-                                (MatchParticipants.status eq "SELECTED")
-                    }.count()
-
-                    val guestSelectedCount = MatchParticipants.select {
-                        (MatchParticipants.matchId eq matchId) and
-                                (MatchParticipants.teamSide eq "GUEST") and
-                                (MatchParticipants.status eq "SELECTED")
-                    }.count()
-
-                    if (homeSelectedCount < 4 || guestSelectedCount < 4) {
-                        throw IllegalArgumentException("Mindkét csapatból legalább 4 játékos kiválasztása szükséges a meccs indításához!")
-                    }
-
-                    // 3. Meccs elindítása és LOCKED státuszok beállítása
-                    Matches.update({ Matches.id eq matchId }) { it[status] = "in_progress" }
-
-                    MatchParticipants.update({
-                        (MatchParticipants.matchId eq matchId) and (MatchParticipants.status eq "SELECTED")
-                    }) {
-                        it[status] = "LOCKED"
-                    }
-
-                    // 4. Értesítendők kigyűjtése (A kapitányt most már BENT HAGYJUK a listában!)
-                    val tokensWithEmails = (MatchParticipants innerJoin Users innerJoin FcmTokens)
-                        .slice(Users.email, FcmTokens.token)
-                        .select {
-                            (MatchParticipants.matchId eq matchId) and
-                                    (MatchParticipants.status eq "LOCKED")
-                        }
-                        .map { Pair(it[Users.email], it[FcmTokens.token]) }
-
-                    val homeTeamName = Teams.select { Teams.id eq matchRow[Matches.homeTeamId] }.single()[Teams.name]
-                    val guestTeamName = Teams.select { Teams.id eq matchRow[Matches.guestTeamId] }.single()[Teams.name]
-
-                    Pair(tokensWithEmails, "$homeTeamName vs $guestTeamName")
-                }
-
-                if (notificationData == null) {
-                    call.respond(HttpStatusCode.Forbidden, "Hiba az indításkor: nincs jogosultság vagy nem található a meccs.")
-                } else {
-                    call.respond(HttpStatusCode.OK, mapOf("status" to "finalized"))
-
-                    applicationScope.launch {
-                        val (players, title) = notificationData
-                        players.forEach { (email, token) ->
-                            FirebaseService.sendNotification(
-                                db = db,
-                                email = email,
-                                token = token,
-                                dataPayload = mapOf(
-                                    "type" to "MATCH_STARTED",
-                                    "matchId" to matchId.toString(),
-                                    "homeTeam" to title.split(" vs ")[0],  // A "$homeName vs $guestName" string felbontása
-                                    "guestTeam" to title.split(" vs ")[1]
-                                )
-                            )
-                        }
-                    }
-                }
-            } catch (e: IllegalArgumentException) {
-                appLog.warn("Sikertelen indítási kísérlet: ${e.message}")
-                call.respond(HttpStatusCode.BadRequest, e.message ?: "Hiányzó játékosok.")
-            } catch (e: Exception) {
-                appLog.error("Hiba a véglegesítésnél: ${e.message}", e)
-                call.respond(HttpStatusCode.InternalServerError, "Szerver oldali hiba: ${e.message}")
-            }
-        }
-
         // --- STÁTUSZ FRISSÍTÉSE (Betesz / Kivesz) ---
         put("/matches/participants/{participantId}/status") {
             val principal = call.principal<UserIdPrincipal>()
@@ -440,6 +350,72 @@ fun Route.matchRoutes(
             }
         }
 
+        // --- KAPITÁNYI VÉGLEGESÍTÉS / INDÍTÁS ---
+        post("/matches/{matchId}/finalize") {
+            val principal = call.principal<UserIdPrincipal>()
+            val firebaseUid = principal?.name ?: return@post call.respond(HttpStatusCode.Unauthorized)
+            val matchId = call.parameters["matchId"]?.toIntOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, "Invalid Match ID")
+
+            try {
+                val notificationData = transaction(db) {
+                    val userRow = Users.select { Users.firebaseUid eq firebaseUid }.singleOrNull() ?: return@transaction null
+                    val captainUserId = userRow[Users.id]
+                    val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull() ?: return@transaction null
+
+                    val isHomeCap = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.homeTeamId]) and (TeamMembers.userId eq captainUserId) and (TeamMembers.isCaptain eq true) }.count() > 0
+                    val isGuestCap = TeamMembers.select { (TeamMembers.teamId eq matchRow[Matches.guestTeamId]) and (TeamMembers.userId eq captainUserId) and (TeamMembers.isCaptain eq true) }.count() > 0
+
+                    if (!isHomeCap && !isGuestCap) return@transaction null
+
+                    // 1. Meccs elindítása (De a résztvevők státuszát NEM bántjuk, maradnak SELECTED, hogy le lehessen adni a sorrendet!)
+                    Matches.update({ Matches.id eq matchId }) { it[status] = "in_progress" }
+
+                    // 2. Kigyűjtjük az éppen JÁTSZÓ (keretben lévő) játékosok ID-jait, akiket NEM akarunk most értesíteni
+                    val playingUserIds = MatchParticipants.slice(MatchParticipants.userId).select {
+                        (MatchParticipants.matchId eq matchId) and (MatchParticipants.status eq "SELECTED")
+                    }.map { it[MatchParticipants.userId] }
+
+                    // 3. Értesítendők kigyűjtése: A KÉT CSAPAT MINDEN TAGJA, AKI NINCS A JÁTSZÓK KÖZÖTT (A nézők)
+                    val tokensWithEmails = (TeamMembers innerJoin Users innerJoin FcmTokens)
+                        .slice(Users.email, FcmTokens.token)
+                        .select {
+                            ((TeamMembers.teamId eq matchRow[Matches.homeTeamId]) or (TeamMembers.teamId eq matchRow[Matches.guestTeamId])) and
+                                    (Users.id notInList playingUserIds)
+                        }
+                        .withDistinct()
+                        .map { Pair(it[Users.email], it[FcmTokens.token]) }
+
+                    val homeTeamName = Teams.select { Teams.id eq matchRow[Matches.homeTeamId] }.single()[Teams.name]
+                    val guestTeamName = Teams.select { Teams.id eq matchRow[Matches.guestTeamId] }.single()[Teams.name]
+
+                    Pair(tokensWithEmails, "$homeTeamName vs $guestTeamName")
+                }
+
+                if (notificationData != null) {
+                    val (spectators, title) = notificationData
+
+                    // Értesítés kiküldése a nézőknek
+                    applicationScope.launch {
+                        spectators.forEach { (email, token) ->
+                            FirebaseService.sendNotification(
+                                db = db, email = email, token = token,
+                                dataPayload = mapOf(
+                                    "type" to "MATCH_STARTED",
+                                    "matchId" to matchId.toString(),
+                                    "homeTeam" to title.split(" vs ")[0],
+                                    "guestTeam" to title.split(" vs ")[1]
+                                )
+                            )
+                        }
+                    }
+                }
+                call.respond(HttpStatusCode.OK, mapOf("status" to "finalized"))
+
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, "Szerver oldali hiba: ${e.message}")
+            }
+        }
+
         // --- SORREND LEADÁSA (LINEUP) ---
         post("/matches/{matchId}/lineup") {
             val principal = call.principal<UserIdPrincipal>()
@@ -449,39 +425,53 @@ fun Route.matchRoutes(
 
             try {
                 val isMatchReadyForGrid = transaction(db) {
-                    // 1. Jogosultság (Csapattag-e?)
                     val userRow = Users.select { Users.firebaseUid eq firebaseUid }.singleOrNull() ?: throw Exception("User not found")
                     val submittingUserId = userRow[Users.id]
                     val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull() ?: throw Exception("Match not found")
 
-                    // JAVÍTVA: Csak azt nézzük, hogy tagja-e a csapatnak (nem kell kapitánynak lennie)
                     val targetTeamId = if (lineupRequest.teamSide == "HOME") matchRow[Matches.homeTeamId] else matchRow[Matches.guestTeamId]
                     val isTeamMember = TeamMembers.select {
                         (TeamMembers.teamId eq targetTeamId) and (TeamMembers.userId eq submittingUserId)
                     }.count() > 0
 
                     if (!isTeamMember) throw Exception("Nem vagy a csapat tagja, így nem adhatsz le sorrendet!")
-
                     if (lineupRequest.positions.size != 4) throw Exception("Pontosan 4 játékost kell megadni a sorrendhez!")
 
-                    // 2. Beírjuk a pozíciókat az adatbázisba (és a státuszt LOCKED-re tesszük)
+                    // 1. Beírjuk a pozíciókat az adatbázisba (LOCKED)
+                    val slottedUserIds = lineupRequest.positions.values.toList()
                     lineupRequest.positions.forEach { (pos, uId) ->
                         MatchParticipants.update({
-                            (MatchParticipants.matchId eq matchId) and
-                                    (MatchParticipants.userId eq uId) and
-                                    (MatchParticipants.teamSide eq lineupRequest.teamSide)
+                            (MatchParticipants.matchId eq matchId) and (MatchParticipants.userId eq uId) and (MatchParticipants.teamSide eq lineupRequest.teamSide)
                         }) {
                             it[position] = pos
                             it[status] = "LOCKED"
                         }
                     }
 
+                    // 2. ÉRTESÍTÉS A 4 KEZDŐ JÁTÉKOSNAK
+                    val homeTeamName = Teams.select { Teams.id eq matchRow[Matches.homeTeamId] }.single()[Teams.name]
+                    val guestTeamName = Teams.select { Teams.id eq matchRow[Matches.guestTeamId] }.single()[Teams.name]
+
+                    val slottedTokens = (Users innerJoin FcmTokens).slice(Users.email, FcmTokens.token)
+                        .select { Users.id inList slottedUserIds }.map { Pair(it[Users.email], it[FcmTokens.token]) }
+
+                    applicationScope.launch {
+                        slottedTokens.forEach { (email, token) ->
+                            FirebaseService.sendNotification(
+                                db = db, email = email, token = token,
+                                dataPayload = mapOf(
+                                    "type" to "PLAYER_PUT_IN_LINEUP",
+                                    "matchId" to matchId.toString(),
+                                    "matchName" to "$homeTeamName vs $guestTeamName"
+                                )
+                            )
+                        }
+                    }
+
                     // 3. Megnézzük, hogy a TÖBBI csapat leadta-e már a sorrendet?
                     val otherSide = if (lineupRequest.teamSide == "HOME") "GUEST" else "HOME"
                     val otherSideLockedCount = MatchParticipants.select {
-                        (MatchParticipants.matchId eq matchId) and
-                                (MatchParticipants.teamSide eq otherSide) and
-                                (MatchParticipants.status eq "LOCKED")
+                        (MatchParticipants.matchId eq matchId) and (MatchParticipants.teamSide eq otherSide) and (MatchParticipants.status eq "LOCKED")
                     }.count()
 
                     otherSideLockedCount == 4L
@@ -496,12 +486,11 @@ fun Route.matchRoutes(
                         val guestPlayersByPos = MatchParticipants.select { (MatchParticipants.matchId eq matchId) and (MatchParticipants.teamSide eq "GUEST") and (MatchParticipants.status eq "LOCKED") }
                             .associate { it[MatchParticipants.position]!! to it[MatchParticipants.userId] }
 
-                        // A hivatalos 16 meccses asztalitenisz párosítás mátrixa (Home Pos vs Guest Pos)
                         val pairings = listOf(
-                            Pair(1, 1), Pair(2, 2), Pair(3, 3), Pair(4, 4), // 1. kör
-                            Pair(1, 2), Pair(2, 3), Pair(3, 4), Pair(4, 1), // 2. kör
-                            Pair(1, 3), Pair(2, 4), Pair(3, 1), Pair(4, 2), // 3. kör
-                            Pair(1, 4), Pair(2, 1), Pair(3, 2), Pair(4, 3)  // 4. kör
+                            Pair(1, 1), Pair(2, 2), Pair(3, 3), Pair(4, 4),
+                            Pair(1, 2), Pair(2, 3), Pair(3, 4), Pair(4, 1),
+                            Pair(1, 3), Pair(2, 4), Pair(3, 1), Pair(4, 2),
+                            Pair(1, 4), Pair(2, 1), Pair(3, 2), Pair(4, 3)
                         )
 
                         IndividualMatches.deleteWhere { IndividualMatches.matchId eq matchId }
@@ -521,14 +510,12 @@ fun Route.matchRoutes(
                             }
                         }
                     }
-
                     call.respond(HttpStatusCode.OK, mapOf("status" to "grid_generated"))
                 } else {
                     call.respond(HttpStatusCode.OK, mapOf("status" to "waiting_for_opponent"))
                 }
 
             } catch (e: Exception) {
-                appLog.error("Hiba a sorrend mentésekor: ${e.message}", e)
                 call.respond(HttpStatusCode.BadRequest, e.message ?: "Hiba történt")
             }
         }
