@@ -67,10 +67,40 @@
         <button onclick="switchTab('matchesTab')" id="btn-matchesTab" class="tab-inactive pb-4 px-1 text-base transition-colors duration-200" data-i18n="tab_matches">
             Mérkőzések
         </button>
+        <button onclick="switchTab('leaderboardTab')" id="btn-leaderboardTab" class="tab-inactive pb-4 px-1 text-base transition-colors duration-200" data-i18n="tab_leaderboard">Ranglista</button>
         <button onclick="switchTab('systemTab')" id="btn-systemTab" class="tab-inactive pb-4 px-1 text-base transition-colors duration-200" data-i18n="tab_system">
             Rendszer & Értesítések
         </button>
     </nav>
+
+    <div id="leaderboardTab" class="tab-content hidden">
+        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden max-w-5xl mx-auto">
+
+            <div class="p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
+                <h2 class="text-lg font-bold text-slate-800 dark:text-white" data-i18n="leaderboard_title">Bajnokság Állása</h2>
+
+                <select id="leaderboardDivisionFilter" onchange="renderLeaderboard()" class="px-4 py-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-sm font-semibold outline-none dark:text-white transition-colors">
+                    <option value="" data-i18n="all_divisions">Összes Divízió</option>
+                </select>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                    <tr class="bg-slate-100 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400 text-xs uppercase">
+                        <th class="px-6 py-4 font-bold w-16">#</th>
+                        <th class="px-6 py-4 font-bold" data-i18n="team">Csapat</th>
+                        <th class="px-6 py-4 font-bold text-center w-24" data-i18n="matches_played">M</th>
+                        <th class="px-6 py-4 font-bold text-center w-32" data-i18n="v_d_l">Gy - D - V</th>
+                        <th class="px-6 py-4 font-bold text-right text-indigo-600 dark:text-indigo-400 w-24" data-i18n="points">Pont</th>
+                    </tr>
+                    </thead>
+                    <tbody id="leaderboardTbody" class="divide-y divide-slate-200 dark:divide-slate-700">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 
     <div id="teamsTab" class="tab-content block">
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">

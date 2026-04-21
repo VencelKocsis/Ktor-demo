@@ -62,6 +62,8 @@ async function fetchTeams() {
         });
 
         if (typeof updateMatchTeamDropdowns === "function") updateMatchTeamDropdowns();
+        if (typeof updateLeaderboardFilters === "function") updateLeaderboardFilters();
+        if (typeof renderLeaderboard === "function") renderLeaderboard();
 
     } catch (error) {
         console.error(error);
@@ -210,4 +212,72 @@ async function deleteTeam(id) {
     } catch (error) {
         showStatus(error.message, true);
     }
+}
+
+// --- RANGLISTA LOGIKA ---
+
+function updateLeaderboardFilters() {
+    const filterSelect = document.getElementById('leaderboardDivisionFilter');
+    if (!filterSelect) return;
+
+    const currentVal = filterSelect.value;
+
+    // Kinyerjük a létező divíziókat a csapatokból, és kiszűrjük az üreseket
+    const divisions = [...new Set(teamsDataCache.map(t => t.division).filter(d => d))].sort();
+
+    filterSelect.innerHTML = `<option value="">${t('all_divisions')}</option>`;
+    divisions.forEach(div => {
+        const selected = (div === currentVal) ? 'selected' : '';
+        filterSelect.innerHTML += `<option value="${div}" ${selected}>${div}</option>`;
+    });
+}
+
+function renderLeaderboard() {
+    const tbody = document.getElementById('leaderboardTbody');
+    const divisionFilter = document.getElementById('leaderboardDivisionFilter')?.value;
+
+    if (!tbody || !teamsDataCache) return;
+
+    // 1. Szűrés divízió szerint (ha van kiválasztva)
+    let filteredTeams = teamsDataCache;
+    if (divisionFilter) {
+        filteredTeams = filteredTeams.filter(t => t.division === divisionFilter);
+    }
+
+    // 2. Rendezzük a csapatokat pontszám (csökkenő), majd győzelem (csökkenő) szerint
+    filteredTeams.sort((a, b) => {
+        if (b.points !== a.points) return b.points - a.points;
+        return b.wins - a.wins;
+    });
+
+    tbody.innerHTML = '';
+
+    if (filteredTeams.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-8 text-center text-slate-500 dark:text-slate-400 font-medium">${t('no_teams_in_division')}</td></tr>`;
+        return;
+    }
+
+    // 3. Táblázat sorainak generálása
+    filteredTeams.forEach((team, index) => {
+        const rank = index + 1;
+        // Az első 3 helyezett kiemelése
+        const rankClass = rank <= 3 ? 'font-black text-indigo-600 dark:text-indigo-400 text-lg' : 'font-bold text-slate-600 dark:text-slate-300';
+
+        tbody.innerHTML += `
+            <tr class="hover:bg-slate-50 dark:hover:bg-slate-700/20 transition-colors">
+                <td class="px-6 py-4 ${rankClass}">${rank}.</td>
+                <td class="px-6 py-4">
+                    <div class="font-bold text-slate-800 dark:text-white text-base">${team.teamName}</div>
+                    <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">${team.clubName} ${team.division ? ' • ' + team.division : ''}</div>
+                </td>
+                <td class="px-6 py-4 text-center font-bold text-slate-700 dark:text-slate-300">${team.matchesPlayed}</td>
+                <td class="px-6 py-4 text-center text-sm font-bold text-slate-600 dark:text-slate-300 tracking-wide">
+                    <span class="text-emerald-600 dark:text-emerald-400">${team.wins}</span> -
+                    <span class="text-amber-500 dark:text-amber-400">${team.draws}</span> -
+                    <span class="text-rose-600 dark:text-rose-400">${team.losses}</span>
+                </td>
+                <td class="px-6 py-4 text-right text-xl font-black text-indigo-600 dark:text-indigo-400">${team.points}</td>
+            </tr>
+        `;
+    });
 }

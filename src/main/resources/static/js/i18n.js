@@ -44,6 +44,15 @@ const translations = {
         "ws_active": "WS Aktív",
         "ws_disconnected": "WS Bontva",
 
+        "tab_leaderboard": "Ranglista",
+        "leaderboard_title": "Bajnokság Állása",
+        "team": "Csapat",
+        "matches_played": "M",
+        "v_d_l": "Gy - D - V",
+        "points": "Pont",
+        "all_divisions": "Összes Divízió",
+        "no_teams_in_division": "Nincs megjeleníthető csapat ebben a divízióban.",
+
         // ---Dinamikus JS tartalmakhoz ---
         "select_club": "Válassz klubot...",
         "no_clubs": "Még nincsenek klubok.",
@@ -110,6 +119,15 @@ const translations = {
         "ws_connecting": "WS Connecting...",
         "ws_active": "WS Active",
         "ws_disconnected": "WS Disconnected",
+
+        "tab_leaderboard": "Leaderboard",
+        "leaderboard_title": "Championship Standings",
+        "team": "Team",
+        "matches_played": "P",
+        "v_d_l": "W - D - L",
+        "points": "PTS",
+        "all_divisions": "All Divisions",
+        "no_teams_in_division": "No teams to display in this division.",
 
         // --- For dynamic JS content ---
         "select_club": "Select a club...",

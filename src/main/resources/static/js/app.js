@@ -53,3 +53,5 @@ window.deleteTeam = deleteTeam;
 window.fetchMatches = fetchMatches;
 window.addMatch = addMatch;
 window.deleteMatch = deleteMatch;
+
+window.renderLeaderboard = renderLeaderboard;
