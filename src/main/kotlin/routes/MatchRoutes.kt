@@ -460,13 +460,11 @@ fun Route.matchRoutes(
                     applicationScope.launch {
                         slottedTokens.forEach { (email, token) ->
                             FirebaseService.sendNotification(
-                                db = db,
-                                email = email,
-                                token = token,
+                                db = db, email = email, token = token,
                                 dataPayload = mapOf(
                                     "type" to "PLAYER_PUT_IN_LINEUP",
                                     "matchId" to matchId.toString(),
-                                    "matchName" to matchTitle
+                                    "matchName" to "$homeTeamName vs $guestTeamName"
                                 )
                             )
                         }
