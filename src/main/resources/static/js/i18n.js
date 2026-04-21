@@ -52,6 +52,8 @@ const translations = {
         "points": "Pont",
         "all_divisions": "Összes Divízió",
         "no_teams_in_division": "Nincs megjeleníthető csapat ebben a divízióban.",
+        "all_seasons": "Összes Szezon",
+        "no_more_teams": "Nincs több megjeleníthető csapat.",
 
         // ---Dinamikus JS tartalmakhoz ---
         "select_club": "Válassz klubot...",
@@ -128,6 +130,8 @@ const translations = {
         "points": "PTS",
         "all_divisions": "All Divisions",
         "no_teams_in_division": "No teams to display in this division.",
+        "all_seasons": "All Seasons",
+        "no_more_teams": "No more teams to display.",
 
         // --- For dynamic JS content ---
         "select_club": "Select a club...",

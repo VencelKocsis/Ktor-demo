@@ -13,6 +13,8 @@ const PLACEHOLDER_FCM_TOKEN = 'WEB_TEST_TOKEN_' + crypto.randomUUID();
 let playersData = [];
 let teamsDataCache = [];
 let clubsDataCache = [];
+let matchesDataCache = [];
+let seasonsDataCache = [];
 
 // ==========================================
 // UI SEGÉDFÜGGVÉNYEK

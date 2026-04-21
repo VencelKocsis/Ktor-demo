@@ -214,61 +214,141 @@ async function deleteTeam(id) {
     }
 }
 
-// --- RANGLISTA LOGIKA ---
+// RANGLISTA (LEADERBOARD) LOGIKA & PÓDIUM
 
 function updateLeaderboardFilters() {
-    const filterSelect = document.getElementById('leaderboardDivisionFilter');
-    if (!filterSelect) return;
+    const divFilter = document.getElementById('leaderboardDivisionFilter');
+    const seasonFilter = document.getElementById('leaderboardSeasonFilter');
 
-    const currentVal = filterSelect.value;
+    if (divFilter && teamsDataCache) {
+        const currentDiv = divFilter.value;
+        const divisions = [...new Set(teamsDataCache.map(t => t.division).filter(d => d))].sort();
+        divFilter.innerHTML = `<option value="">${t('all_divisions')}</option>`;
+        divisions.forEach(d => {
+            divFilter.innerHTML += `<option value="${d}" ${d === currentDiv ? 'selected' : ''}>${d}</option>`;
+        });
+        divFilter.value = currentDiv;
+    }
 
-    // Kinyerjük a létező divíziókat a csapatokból, és kiszűrjük az üreseket
-    const divisions = [...new Set(teamsDataCache.map(t => t.division).filter(d => d))].sort();
+    if (seasonFilter && seasonsDataCache) {
+        const activeSeasonId = seasonsDataCache.find(s => s.isActive)?.id?.toString();
+        const currentSeason = seasonFilter.value || activeSeasonId || '';
 
-    filterSelect.innerHTML = `<option value="">${t('all_divisions')}</option>`;
-    divisions.forEach(div => {
-        const selected = (div === currentVal) ? 'selected' : '';
-        filterSelect.innerHTML += `<option value="${div}" ${selected}>${div}</option>`;
+        seasonFilter.innerHTML = `<option value="">${t('all_seasons')}</option>`;
+        seasonsDataCache.forEach(s => {
+            seasonFilter.innerHTML += `<option value="${s.id}" ${s.id.toString() === currentSeason ? 'selected' : ''}>${s.name}</option>`;
+        });
+
+        seasonFilter.value = currentSeason;
+    }
+}
+
+function calculateDynamicStats(seasonIdFilter) {
+    // 1. Alapértelmezett, nulla statisztika minden csapatnak
+    const statsMap = {};
+    teamsDataCache.forEach(t => {
+        statsMap[t.teamId] = { ...t, matchesPlayed: 0, wins: 0, draws: 0, losses: 0, points: 0 };
     });
+
+    // 2. Kiszűrjük a befejezett meccseket, és rászűrünk a szezonra, ha van
+    let validMatches = matchesDataCache.filter(m => m.status === 'finished');
+    if (seasonIdFilter) {
+        validMatches = validMatches.filter(m => m.seasonId.toString() === seasonIdFilter.toString());
+    }
+
+    // 3. Pontszámítás (Győzelem = 2 pont, Döntetlen = 1 pont)
+    validMatches.forEach(m => {
+        const home = statsMap[m.homeTeamId];
+        const guest = statsMap[m.guestTeamId];
+        if (!home || !guest) return;
+
+        home.matchesPlayed++;
+        guest.matchesPlayed++;
+
+        if (m.homeScore > m.guestScore) {
+            home.wins++; home.points += 2;
+            guest.losses++;
+        } else if (m.homeScore < m.guestScore) {
+            guest.wins++; guest.points += 2;
+            home.losses++;
+        } else {
+            home.draws++; home.points += 1;
+            guest.draws++; guest.points += 1;
+        }
+    });
+
+    return Object.values(statsMap);
+}
+
+function createPodiumItem(team, rank, heightClass, colorClass, gradientClass) {
+    if (!team) {
+        return `<div class="flex flex-col items-center w-1/3 max-w-[140px]">
+                    <div class="text-slate-400 font-bold mb-2">-</div>
+                    <div class="w-full ${heightClass} ${gradientClass} rounded-t-xl opacity-20"></div>
+                </div>`;
+    }
+    return `
+    <div class="flex flex-col items-center w-1/3 max-w-[140px] transform transition-transform hover:-translate-y-2 group">
+        <div class="text-center mb-3">
+            <div class="font-extrabold text-slate-800 dark:text-white truncate w-full px-1 text-sm sm:text-base" title="${team.teamName}">${team.teamName}</div>
+            <div class="font-black ${colorClass} text-lg sm:text-xl drop-shadow-sm">${team.points} <span class="text-xs">PTS</span></div>
+        </div>
+        <div class="w-full ${heightClass} ${gradientClass} shadow-xl rounded-t-xl flex justify-center items-start pt-4 relative overflow-hidden border-t border-white/30">
+            <div class="absolute inset-0 bg-gradient-to-b from-white/20 to-transparent"></div>
+            <span class="text-5xl font-black text-white/90 drop-shadow-md z-10">${rank}</span>
+        </div>
+    </div>`;
 }
 
 function renderLeaderboard() {
     const tbody = document.getElementById('leaderboardTbody');
+    const podiumContainer = document.getElementById('podiumContainer');
     const divisionFilter = document.getElementById('leaderboardDivisionFilter')?.value;
+    const seasonFilter = document.getElementById('leaderboardSeasonFilter')?.value;
 
-    if (!tbody || !teamsDataCache) return;
+    if (!tbody || !podiumContainer || !teamsDataCache) return;
 
-    // 1. Szűrés divízió szerint (ha van kiválasztva)
-    let filteredTeams = teamsDataCache;
+    // 1. Dinamikus pontszámítás
+    let filteredTeams = calculateDynamicStats(seasonFilter);
+
+    // 2. Divízió szűrés
     if (divisionFilter) {
         filteredTeams = filteredTeams.filter(t => t.division === divisionFilter);
     }
 
-    // 2. Rendezzük a csapatokat pontszám (csökkenő), majd győzelem (csökkenő) szerint
+    // 3. Rendezés (Pontszám szerint csökkenő, majd Győzelmek száma szerint)
     filteredTeams.sort((a, b) => {
         if (b.points !== a.points) return b.points - a.points;
         return b.wins - a.wins;
     });
 
-    tbody.innerHTML = '';
+    // === PÓDIUM RENDERELÉS ===
+    const top3 = filteredTeams.slice(0, 3);
 
-    if (filteredTeams.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-8 text-center text-slate-500 dark:text-slate-400 font-medium">${t('no_teams_in_division')}</td></tr>`;
+    // Ezüst (2. hely), Arany (1. hely), Bronz (3. hely) elrendezés
+    podiumContainer.innerHTML = `
+        ${createPodiumItem(top3[1], 2, 'h-32', 'text-slate-500 dark:text-slate-300', 'bg-gradient-to-b from-slate-300 to-slate-500 dark:from-slate-500 dark:to-slate-700')}
+        ${createPodiumItem(top3[0], 1, 'h-44', 'text-amber-500 dark:text-amber-400', 'bg-gradient-to-b from-yellow-300 to-yellow-600 dark:from-yellow-400 dark:to-yellow-700')}
+        ${createPodiumItem(top3[2], 3, 'h-24', 'text-amber-700 dark:text-amber-600', 'bg-gradient-to-b from-amber-600 to-amber-800 dark:from-amber-700 dark:to-amber-900')}
+    `;
+
+    // === TÁBLÁZAT RENDERELÉS (4. Helytől) ===
+    tbody.innerHTML = '';
+    const remainingTeams = filteredTeams.slice(3);
+
+    if (remainingTeams.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-8 text-center text-slate-400 font-medium">${t('no_more_teams')}</td></tr>`;
         return;
     }
 
-    // 3. Táblázat sorainak generálása
-    filteredTeams.forEach((team, index) => {
-        const rank = index + 1;
-        // Az első 3 helyezett kiemelése
-        const rankClass = rank <= 3 ? 'font-black text-indigo-600 dark:text-indigo-400 text-lg' : 'font-bold text-slate-600 dark:text-slate-300';
-
+    remainingTeams.forEach((team, index) => {
+        const actualRank = index + 4; // Mivel a top 3 le van vágva
         tbody.innerHTML += `
-            <tr class="hover:bg-slate-50 dark:hover:bg-slate-700/20 transition-colors">
-                <td class="px-6 py-4 ${rankClass}">${rank}.</td>
+            <tr class="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                <td class="px-6 py-4 font-bold text-slate-500 dark:text-slate-400">${actualRank}.</td>
                 <td class="px-6 py-4">
                     <div class="font-bold text-slate-800 dark:text-white text-base">${team.teamName}</div>
-                    <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">${team.clubName} ${team.division ? ' • ' + team.division : ''}</div>
+                    <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">${team.clubName}</div>
                 </td>
                 <td class="px-6 py-4 text-center font-bold text-slate-700 dark:text-slate-300">${team.matchesPlayed}</td>
                 <td class="px-6 py-4 text-center text-sm font-bold text-slate-600 dark:text-slate-300 tracking-wide">
@@ -276,7 +356,7 @@ function renderLeaderboard() {
                     <span class="text-amber-500 dark:text-amber-400">${team.draws}</span> -
                     <span class="text-rose-600 dark:text-rose-400">${team.losses}</span>
                 </td>
-                <td class="px-6 py-4 text-right text-xl font-black text-indigo-600 dark:text-indigo-400">${team.points}</td>
+                <td class="px-6 py-4 text-right text-lg font-black text-indigo-600 dark:text-indigo-400">${team.points}</td>
             </tr>
         `;
     });

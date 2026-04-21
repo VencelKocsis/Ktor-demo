@@ -76,28 +76,39 @@
     <div id="leaderboardTab" class="tab-content hidden">
         <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden max-w-5xl mx-auto">
 
-            <div class="p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
+            <div class="p-6 border-b border-slate-200 dark:border-slate-700 flex flex-wrap gap-4 justify-between items-center bg-slate-50 dark:bg-slate-800/50">
                 <h2 class="text-lg font-bold text-slate-800 dark:text-white" data-i18n="leaderboard_title">Bajnokság Állása</h2>
 
-                <select id="leaderboardDivisionFilter" onchange="renderLeaderboard()" class="px-4 py-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-sm font-semibold outline-none dark:text-white transition-colors">
-                    <option value="" data-i18n="all_divisions">Összes Divízió</option>
-                </select>
+                <div class="flex gap-3">
+                    <select id="leaderboardSeasonFilter" onchange="renderLeaderboard()" class="px-4 py-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-sm font-semibold outline-none dark:text-white transition-colors">
+                        <option value="" data-i18n="all_seasons">Összes Szezon</option>
+                    </select>
+
+                    <select id="leaderboardDivisionFilter" onchange="renderLeaderboard()" class="px-4 py-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-sm font-semibold outline-none dark:text-white transition-colors">
+                        <option value="" data-i18n="all_divisions">Összes Divízió</option>
+                    </select>
+                </div>
             </div>
 
-            <div class="overflow-x-auto">
-                <table class="w-full text-left border-collapse">
-                    <thead>
-                    <tr class="bg-slate-100 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400 text-xs uppercase">
-                        <th class="px-6 py-4 font-bold w-16">#</th>
-                        <th class="px-6 py-4 font-bold" data-i18n="team">Csapat</th>
-                        <th class="px-6 py-4 font-bold text-center w-24" data-i18n="matches_played">M</th>
-                        <th class="px-6 py-4 font-bold text-center w-32" data-i18n="v_d_l">Gy - D - V</th>
-                        <th class="px-6 py-4 font-bold text-right text-indigo-600 dark:text-indigo-400 w-24" data-i18n="points">Pont</th>
-                    </tr>
-                    </thead>
-                    <tbody id="leaderboardTbody" class="divide-y divide-slate-200 dark:divide-slate-700">
-                    </tbody>
-                </table>
+            <div class="p-6">
+                <div id="podiumContainer" class="flex justify-center items-end gap-2 sm:gap-6 mt-4 mb-12 h-64">
+                </div>
+
+                <div class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                        <tr class="bg-slate-100 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400 text-xs uppercase">
+                            <th class="px-6 py-4 font-bold w-16">#</th>
+                            <th class="px-6 py-4 font-bold" data-i18n="team">Csapat</th>
+                            <th class="px-6 py-4 font-bold text-center w-24" data-i18n="matches_played">M</th>
+                            <th class="px-6 py-4 font-bold text-center w-32" data-i18n="v_d_l">Gy - D - V</th>
+                            <th class="px-6 py-4 font-bold text-right text-indigo-600 dark:text-indigo-400 w-24" data-i18n="points">Pont</th>
+                        </tr>
+                        </thead>
+                        <tbody id="leaderboardTbody" class="divide-y divide-slate-200 dark:divide-slate-700">
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>

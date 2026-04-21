@@ -1,22 +1,3 @@
-async function fetchSeasons() {
-    try {
-        const response = await fetch(SEASONS_API_URL);
-        if (!response.ok) throw new Error("Hiba a szezonok betöltésekor");
-        const seasons = await response.json();
-
-        const seasonSelect = document.getElementById('matchSeason');
-        if (seasonSelect) {
-            seasonSelect.innerHTML = `<option value="">${t('select_season')}</option>`;
-            seasons.forEach(s => {
-                const selected = s.isActive ? 'selected' : '';
-                seasonSelect.innerHTML += `<option value="${s.id}" ${selected}>${s.name}</option>`;
-            });
-        }
-    } catch (error) {
-        console.error(error);
-    }
-}
-
 function updateMatchTeamDropdowns() {
     const homeSelect = document.getElementById('matchHomeTeam');
     const guestSelect = document.getElementById('matchGuestTeam');
@@ -32,6 +13,30 @@ function updateMatchTeamDropdowns() {
     }
 }
 
+async function fetchSeasons() {
+    try {
+        const response = await fetch(SEASONS_API_URL);
+        if (!response.ok) throw new Error("Hiba a szezonok betöltésekor");
+        const seasons = await response.json();
+
+        seasonsDataCache = seasons;
+
+        const seasonSelect = document.getElementById('matchSeason');
+        if (seasonSelect) {
+            seasonSelect.innerHTML = `<option value="">${t('select_season')}</option>`;
+            seasons.forEach(s => {
+                const selected = s.isActive ? 'selected' : '';
+                seasonSelect.innerHTML += `<option value="${s.id}" ${selected}>${s.name}</option>`;
+            });
+        }
+
+        if (typeof updateLeaderboardFilters === 'function') updateLeaderboardFilters();
+
+    } catch (error) {
+        console.error(error);
+    }
+}
+
 async function fetchMatches() {
     const container = document.getElementById('matchesContainer');
     if (!container) return;
@@ -41,6 +46,10 @@ async function fetchMatches() {
         const response = await fetch(MATCHES_API_URL);
         if (!response.ok) throw new Error("Hiba a meccsek lekérésénél");
         const matches = await response.json();
+
+        matchesDataCache = matches;
+
+        if (typeof renderLeaderboard === 'function') renderLeaderboard();
 
         container.innerHTML = '';
         if (matches.length === 0) {
