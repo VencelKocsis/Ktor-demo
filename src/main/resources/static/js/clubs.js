@@ -30,7 +30,7 @@ async function fetchClubs() {
                         </div>
                         <div class="flex gap-2">
                             <button onclick="openEditClub(${club.id})" class="text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 text-sm font-bold bg-emerald-50 dark:bg-emerald-900/30 px-3 py-1.5 rounded-md transition-colors">${t('edit')}</button>
-                            <button onclick="deleteClub(${club.id})" class="text-rose-600 dark:text-rose-400 hover:text-rose-800 dark:hover:text-rose-300 text-sm font-bold bg-rose-50 dark:bg-rose-900/30 px-3 py-1.5 rounded-md transition-colors">Törlés</button>
+                            <button onclick="deleteClub(${club.id})" class="text-rose-600 dark:text-rose-400 hover:text-rose-800 dark:hover:text-rose-300 text-sm font-bold bg-rose-50 dark:bg-rose-900/30 px-3 py-1.5 rounded-md transition-colors">${t('delete')}</button>
                         </div>
                     </div>
                 `;

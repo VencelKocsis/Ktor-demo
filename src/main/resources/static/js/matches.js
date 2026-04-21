@@ -75,7 +75,7 @@ async function fetchMatches() {
                         <div class="text-2xl font-black ${match.status === 'finished' ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-700 dark:text-slate-300'}">
                             ${match.status === 'scheduled' ? '- : -' : `${match.homeScore} : ${match.guestScore}`}
                         </div>
-                        <button onclick="deleteMatch(${match.id})" class="mt-2 text-rose-600 dark:text-rose-400 hover:text-rose-800 dark:hover:text-rose-300 text-xs font-bold px-2 py-1 bg-rose-50 dark:bg-rose-900/30 rounded-md transition-colors">Törlés</button>
+                        <button onclick="deleteMatch(${match.id})" class="mt-2 text-rose-600 dark:text-rose-400 hover:text-rose-800 dark:hover:text-rose-300 text-xs font-bold px-2 py-1 bg-rose-50 dark:bg-rose-900/30 rounded-md transition-colors">${t('delete')}</button>
                     </div>
                 </div>
             `;

@@ -44,10 +44,11 @@ const translations = {
         "ws_active": "WS Aktív",
         "ws_disconnected": "WS Bontva",
 
-        // --- ÚJ: Dinamikus JS tartalmakhoz ---
+        // ---Dinamikus JS tartalmakhoz ---
         "select_club": "Válassz klubot...",
         "no_clubs": "Még nincsenek klubok.",
         "edit": "Módosít",
+        "delete": "Törlés", // <--- ÚJ
         "select_captain": "Kapitány kiválasztása...",
         "loading_teams": "Csapatok betöltése...",
         "no_teams": "Nincsenek regisztrált csapatok.",
@@ -110,10 +111,11 @@ const translations = {
         "ws_active": "WS Active",
         "ws_disconnected": "WS Disconnected",
 
-        // --- NEW: For dynamic JS content ---
+        // --- For dynamic JS content ---
         "select_club": "Select a club...",
         "no_clubs": "No clubs yet.",
         "edit": "Edit",
+        "delete": "Delete",
         "select_captain": "Select captain...",
         "loading_teams": "Loading teams...",
         "no_teams": "No registered teams.",

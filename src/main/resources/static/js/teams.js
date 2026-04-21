@@ -38,7 +38,7 @@ async function fetchTeams() {
                 <div class="bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:shadow-md transition-all relative">
                     <div class="absolute top-4 right-4 flex gap-2">
                         <button onclick="openEditTeam(${team.teamId})" class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 text-sm font-bold bg-indigo-100 dark:bg-indigo-900/30 px-3 py-1 rounded-md transition-colors">${t('edit')}</button>
-                        <button onclick="deleteTeam(${team.teamId})" class="text-rose-600 dark:text-rose-400 hover:text-rose-800 dark:hover:text-rose-300 text-sm font-bold bg-rose-100 dark:bg-rose-900/30 px-3 py-1 rounded-md transition-colors">Törlés</button>
+                        <button onclick="deleteTeam(${team.teamId})" class="text-rose-600 dark:text-rose-400 hover:text-rose-800 dark:hover:text-rose-300 text-sm font-bold bg-rose-100 dark:bg-rose-900/30 px-3 py-1 rounded-md transition-colors">${t('delete')}</button>
                     </div>
                     <div class="flex justify-between items-start mb-4 pr-20">
                         <div>
@@ -118,21 +118,23 @@ function openEditTeam(id) {
     const capSelect = document.getElementById('editTeamCaptain');
     capSelect.innerHTML = '';
 
-    // Varázslat: Összekombináljuk a jelenlegi tagokat és a szabad játékosokat!
-    const combinedPlayers = [...team.members, ...playersData];
+    const playerMap = new Map();
+    team.members.forEach(m => playerMap.set(m.userId, m));
+    playersData.forEach(p => playerMap.set(p.userId, p));
+
+    const combinedPlayers = Array.from(playerMap.values());
 
     combinedPlayers.forEach(p => {
-        // Ellenőrizzük, hogy a játékos az aktuális csapat tagja-e / kapitánya-e
         const isMember = team.members.some(m => m.userId === p.userId);
         const isCaptain = team.members.some(m => m.userId === p.userId && m.isCaptain);
 
         container.innerHTML += `
             <label class="flex items-center gap-2 cursor-pointer dark:text-white text-sm">
                 <input type="checkbox" name="editTeamMembers" value="${p.userId}" ${isMember ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded">
-                ${p.name}
+                ${p.name || 'Névtelen'}
             </label>
         `;
-        capSelect.innerHTML += `<option value="${p.userId}" ${isCaptain ? 'selected' : ''}>${p.name}</option>`;
+        capSelect.innerHTML += `<option value="${p.userId}" ${isCaptain ? 'selected' : ''}>${p.name || 'Névtelen'}</option>`;
     });
 
     const modal = document.getElementById('editTeamModal');
@@ -145,25 +147,26 @@ async function saveTeamEdit(event) {
     const id = document.getElementById('editTeamId').value;
     const divisionVal = document.getElementById('editTeamDivision').value.trim();
 
-    // 1. Összegyűjtjük a bepipált játékosokat a checkboxokból
     const selectedCheckboxes = document.querySelectorAll('input[name="editTeamMembers"]:checked');
     const memberIds = Array.from(selectedCheckboxes).map(cb => parseInt(cb.value, 10));
 
-    // 2. Kinyerjük a kiválasztott kapitányt
     const captainUserId = parseInt(document.getElementById('editTeamCaptain').value, 10);
 
-    // Biztonsági ellenőrzés: a kapitánynak tagnak is kell lennie!
+    if (isNaN(captainUserId)) {
+        showStatus("Hiba: Nincs kiválasztva csapatkapitány!", true);
+        return;
+    }
+
     if (!memberIds.includes(captainUserId)) {
         showStatus("A kiválasztott csapatkapitánynak csapattagnak (bepipálva) is kell lennie!", true);
         return;
     }
 
-    // 3. Felépítjük a teljes DTO-t a Ktor backendnek
     const updateData = {
         name: document.getElementById('editTeamName').value.trim(),
         division: divisionVal.length > 0 ? divisionVal : null,
-        captainUserId: captainUserId,  // Ezt is küldjük!
-        memberIds: memberIds           // És a tagokat is küldjük!
+        captainUserId: captainUserId,
+        memberIds: memberIds
     };
 
     try {
@@ -172,12 +175,15 @@ async function saveTeamEdit(event) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(updateData)
         });
-        if (!response.ok) throw new Error('Hiba a frissítésnél');
+
+        if (!response.ok) {
+            const text = await response.text();
+            throw new Error(text || 'Hiba a frissítésnél');
+        }
 
         closeEditTeamModal();
-        showStatus('Csapat frissítve!');
+        showStatus('Csapat sikeresen frissítve!');
 
-        // Frissítjük a nézeteket
         fetchTeams();
         fetchPlayers();
     } catch (error) {
