@@ -43,32 +43,60 @@ fun Route.matchRoutes(
     // 1. PUBLIKUS VÉGPONTOK (Admin weboldalhoz)
     // ==========================================
 
-    // --- MECCSEK LEKÉRDEZÉSE ---
+    // --- MECCSEK LEKÉRDEZÉSE (Optimalizált N+1 Query javítással) ---
     get("/matches") {
         val round = call.request.queryParameters["round"]?.toIntOrNull()
         try {
             val matches = transaction(db) {
-                val query = if (round != null) Matches.select { Matches.roundNumber eq round } else Matches.selectAll()
+                // 1. Alap meccsek lekérése és ID-k kigyűjtése
+                val matchRows = if (round != null) {
+                    Matches.select { Matches.roundNumber eq round }.toList()
+                } else {
+                    Matches.selectAll().toList()
+                }
 
-                query.map { matchRow ->
+                if (matchRows.isEmpty()) return@transaction emptyList<MatchDTO>()
+
+                val matchIds = matchRows.map { it[Matches.id].value }
+
+                // 2. Szótárak (Mapek) felépítése explicit típusokkal!
+                val teamsMap: Map<Int, String> = Teams.selectAll().associate { it[Teams.id].value to it[Teams.name] }
+                val seasonsMap: Map<Int, String> = Seasons.selectAll().associate { it[Seasons.id].value to it[Seasons.name] }
+                val usersMap: Map<Int, ResultRow> = Users.selectAll().associateBy { it[Users.id].value }
+
+                // 3. Az összes releváns Egyéni Meccs és Résztvevő lekérése EGYBEN, explicit típusokkal
+                val allIndividualMatches = IndividualMatches.select { IndividualMatches.matchId inList matchIds }.toList()
+                val individualMatchesByMatchId: Map<Int, List<ResultRow>> = allIndividualMatches.groupBy { it[IndividualMatches.matchId].value }
+
+                val allParticipants = MatchParticipants.select { MatchParticipants.matchId inList matchIds }.toList()
+                val participantsByMatchId: Map<Int, List<ResultRow>> = allParticipants.groupBy { it[MatchParticipants.matchId].value }
+
+                // 4. Az adatok összefűzése a memóriában (0 extra adatbázis hívással!)
+                matchRows.map { matchRow ->
                     val mId = matchRow[Matches.id].value
-                    val homeTeamEntityId = matchRow[Matches.homeTeamId]
-                    val guestTeamEntityId = matchRow[Matches.guestTeamId]
-                    val homeName = Teams.select { Teams.id eq homeTeamEntityId }.single()[Teams.name]
-                    val guestName = Teams.select { Teams.id eq guestTeamEntityId }.single()[Teams.name]
-
+                    val homeTeamId = matchRow[Matches.homeTeamId].value
+                    val guestTeamId = matchRow[Matches.guestTeamId].value
                     val sId = matchRow[Matches.seasonId].value
-                    val seasonNameStr = Seasons.select { Seasons.id eq sId }.single()[Seasons.name]
 
-                    val individualMatches = IndividualMatches.select { IndividualMatches.matchId eq mId }.map { imRow ->
-                        val homeUserRow = Users.select { Users.id eq imRow[IndividualMatches.homePlayerId] }.single()
-                        val guestUserRow = Users.select { Users.id eq imRow[IndividualMatches.guestPlayerId] }.single()
+                    val homeName = teamsMap[homeTeamId] ?: "Ismeretlen"
+                    val guestName = teamsMap[guestTeamId] ?: "Ismeretlen"
+                    val seasonNameStr = seasonsMap[sId] ?: "Ismeretlen"
+
+                    // Biztonságos olvasás az individualMatchesByMatchId-ből
+                    val imList = individualMatchesByMatchId[mId] ?: emptyList()
+                    val individualMatchesDto = imList.map { imRow ->
+                        val hUserId = imRow[IndividualMatches.homePlayerId].value
+                        val gUserId = imRow[IndividualMatches.guestPlayerId].value
+
+                        val hUser = usersMap[hUserId]
+                        val gUser = usersMap[gUserId]
+
                         IndividualMatchDTO(
                             id = imRow[IndividualMatches.id].value,
-                            homePlayerId = imRow[IndividualMatches.homePlayerId].value,
-                            homePlayerName = "${homeUserRow[Users.lastName]} ${homeUserRow[Users.firstName]}",
-                            guestPlayerId = imRow[IndividualMatches.guestPlayerId].value,
-                            guestPlayerName = "${guestUserRow[Users.lastName]} ${guestUserRow[Users.firstName]}",
+                            homePlayerId = hUserId,
+                            homePlayerName = if (hUser != null) "${hUser[Users.lastName]} ${hUser[Users.firstName]}" else "Ismeretlen",
+                            guestPlayerId = gUserId,
+                            guestPlayerName = if (gUser != null) "${gUser[Users.lastName]} ${gUser[Users.firstName]}" else "Ismeretlen",
                             homeScore = imRow[IndividualMatches.homeScore],
                             guestScore = imRow[IndividualMatches.guestScore],
                             setScores = imRow[IndividualMatches.setScores],
@@ -77,12 +105,17 @@ fun Route.matchRoutes(
                         )
                     }
 
-                    val participants = (MatchParticipants innerJoin Users).select { MatchParticipants.matchId eq mId }.map { mpRow ->
+                    // Biztonságos olvasás a participantsByMatchId-ből
+                    val pList = participantsByMatchId[mId] ?: emptyList()
+                    val participantsDto = pList.map { mpRow ->
+                        val pUserId = mpRow[MatchParticipants.userId].value
+                        val pUser = usersMap[pUserId]
+
                         MatchParticipantDTO(
                             id = mpRow[MatchParticipants.id].value,
-                            userId = mpRow[Users.id].value,
-                            firebaseUid = mpRow[Users.firebaseUid],
-                            playerName = "${mpRow[Users.lastName]} ${mpRow[Users.firstName]}",
+                            userId = pUserId,
+                            firebaseUid = pUser?.get(Users.firebaseUid) ?: "",
+                            playerName = if (pUser != null) "${pUser[Users.lastName]} ${pUser[Users.firstName]}" else "Ismeretlen",
                             teamSide = mpRow[MatchParticipants.teamSide],
                             status = mpRow[MatchParticipants.status],
                             position = mpRow[MatchParticipants.position]
@@ -90,7 +123,7 @@ fun Route.matchRoutes(
                     }
 
                     MatchDTO(
-                        id = matchRow[Matches.id].value,
+                        id = mId,
                         seasonId = sId,
                         seasonName = seasonNameStr,
                         roundNumber = matchRow[Matches.roundNumber] ?: 0,
@@ -101,10 +134,10 @@ fun Route.matchRoutes(
                         date = matchRow[Matches.matchDate]?.toString() ?: "",
                         status = matchRow[Matches.status],
                         location = matchRow[Matches.location] ?: "",
-                        homeTeamId = homeTeamEntityId.value,
-                        guestTeamId = guestTeamEntityId.value,
-                        individualMatches = individualMatches,
-                        participants = participants,
+                        homeTeamId = homeTeamId,
+                        guestTeamId = guestTeamId,
+                        individualMatches = individualMatchesDto,
+                        participants = participantsDto,
                         homeTeamSigned = matchRow[Matches.homeTeamSigned],
                         guestTeamSigned = matchRow[Matches.guestTeamSigned]
                     )
