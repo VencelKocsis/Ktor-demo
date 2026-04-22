@@ -449,27 +449,6 @@ fun Route.matchRoutes(
                         }
                     }
 
-                    // 2. ÉRTESÍTÉS A 4 KEZDŐ JÁTÉKOSNAK
-                    val homeTeamName = Teams.select { Teams.id eq matchRow[Matches.homeTeamId] }.single()[Teams.name]
-                    val guestTeamName = Teams.select { Teams.id eq matchRow[Matches.guestTeamId] }.single()[Teams.name]
-                    val matchTitle = "$homeTeamName vs $guestTeamName"
-
-                    val slottedTokens = (Users innerJoin FcmTokens).slice(Users.email, FcmTokens.token)
-                        .select { Users.id inList slottedUserIds }.map { Pair(it[Users.email], it[FcmTokens.token]) }
-
-                    applicationScope.launch {
-                        slottedTokens.forEach { (email, token) ->
-                            FirebaseService.sendNotification(
-                                db = db, email = email, token = token,
-                                dataPayload = mapOf(
-                                    "type" to "PLAYER_PUT_IN_LINEUP",
-                                    "matchId" to matchId.toString(),
-                                    "matchName" to "$homeTeamName vs $guestTeamName"
-                                )
-                            )
-                        }
-                    }
-
                     // 3. Megnézzük, hogy a TÖBBI csapat leadta-e már a sorrendet?
                     val otherSide = if (lineupRequest.teamSide == "HOME") "GUEST" else "HOME"
                     val otherSideLockedCount = MatchParticipants.select {
