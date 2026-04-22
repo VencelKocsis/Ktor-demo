@@ -508,7 +508,15 @@ fun Route.matchRoutes(
                                     it[this.guestPlayerId] = gPlayerId
                                     it[this.orderNumber] = index + 1
                                     it[this.status] = if (index < 2) "in_progress" else "pending"
+
+                                    it[this.homeScore] = 0
+                                    it[this.guestScore] = 0
+                                    it[this.homeSetsWon] = 0
+                                    it[this.guestSetsWon] = 0
+                                    it[this.setScores] = ""
                                 }
+                            } else {
+                                appLog.error("Hiba a párosításnál! Hiányzó pozíció: H:$hPlayerId, G:$gPlayerId")
                             }
                         }
                     }
@@ -518,7 +526,8 @@ fun Route.matchRoutes(
                 }
 
             } catch (e: Exception) {
-                call.respond(HttpStatusCode.BadRequest, e.message ?: "Hiba történt")
+                appLog.error("Hiba a sorrend mentésekor: ${e.message}", e)
+                call.respond(HttpStatusCode.BadRequest, e.message ?: "Hiba történt a sorrend leadásakor")
             }
         }
 
