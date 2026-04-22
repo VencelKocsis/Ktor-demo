@@ -117,6 +117,82 @@ fun Route.matchRoutes(
         }
     }
 
+    // --- EGYETLEN MECCS LEKÉRDEZÉSE (Optimalizált a részletek képernyőhöz) ---
+    get("/matches/{id}") {
+        val matchId = call.parameters["id"]?.toIntOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest, "Érvénytelen ID")
+        try {
+            val match = transaction(db) {
+                val matchRow = Matches.select { Matches.id eq matchId }.singleOrNull() ?: return@transaction null
+
+                val homeTeamEntityId = matchRow[Matches.homeTeamId]
+                val guestTeamEntityId = matchRow[Matches.guestTeamId]
+                val homeName = Teams.select { Teams.id eq homeTeamEntityId }.single()[Teams.name]
+                val guestName = Teams.select { Teams.id eq guestTeamEntityId }.single()[Teams.name]
+
+                val sId = matchRow[Matches.seasonId].value
+                val seasonNameStr = Seasons.select { Seasons.id eq sId }.single()[Seasons.name]
+
+                val individualMatches = IndividualMatches.select { IndividualMatches.matchId eq matchId }.map { imRow ->
+                    val homeUserRow = Users.select { Users.id eq imRow[IndividualMatches.homePlayerId] }.single()
+                    val guestUserRow = Users.select { Users.id eq imRow[IndividualMatches.guestPlayerId] }.single()
+                    IndividualMatchDTO(
+                        id = imRow[IndividualMatches.id].value,
+                        homePlayerId = imRow[IndividualMatches.homePlayerId].value,
+                        homePlayerName = "${homeUserRow[Users.lastName]} ${homeUserRow[Users.firstName]}",
+                        guestPlayerId = imRow[IndividualMatches.guestPlayerId].value,
+                        guestPlayerName = "${guestUserRow[Users.lastName]} ${guestUserRow[Users.firstName]}",
+                        homeScore = imRow[IndividualMatches.homeScore],
+                        guestScore = imRow[IndividualMatches.guestScore],
+                        setScores = imRow[IndividualMatches.setScores],
+                        status = imRow[IndividualMatches.status],
+                        orderNumber = imRow[IndividualMatches.orderNumber]
+                    )
+                }
+
+                val participants = (MatchParticipants innerJoin Users).select { MatchParticipants.matchId eq matchId }.map { mpRow ->
+                    MatchParticipantDTO(
+                        id = mpRow[MatchParticipants.id].value,
+                        userId = mpRow[Users.id].value,
+                        firebaseUid = mpRow[Users.firebaseUid],
+                        playerName = "${mpRow[Users.lastName]} ${mpRow[Users.firstName]}",
+                        teamSide = mpRow[MatchParticipants.teamSide],
+                        status = mpRow[MatchParticipants.status],
+                        position = mpRow[MatchParticipants.position]
+                    )
+                }
+
+                MatchDTO(
+                    id = matchRow[Matches.id].value,
+                    seasonId = sId,
+                    seasonName = seasonNameStr,
+                    roundNumber = matchRow[Matches.roundNumber] ?: 0,
+                    homeTeamName = homeName,
+                    guestTeamName = guestName,
+                    homeScore = matchRow[Matches.homeTeamScore],
+                    guestScore = matchRow[Matches.guestTeamScore],
+                    date = matchRow[Matches.matchDate]?.toString() ?: "",
+                    status = matchRow[Matches.status],
+                    location = matchRow[Matches.location] ?: "",
+                    homeTeamId = homeTeamEntityId.value,
+                    guestTeamId = guestTeamEntityId.value,
+                    individualMatches = individualMatches,
+                    participants = participants,
+                    homeTeamSigned = matchRow[Matches.homeTeamSigned],
+                    guestTeamSigned = matchRow[Matches.guestTeamSigned]
+                )
+            }
+
+            if (match == null) {
+                call.respond(HttpStatusCode.NotFound, "Meccs nem található")
+            } else {
+                call.respond(match)
+            }
+        } catch (e: Exception) {
+            appLog.error("Hiba a /matches/{id} lekérdezésekor: ${e.message}", e)
+            call.respond(HttpStatusCode.InternalServerError, "Adatbázis hiba történt")
+        }
+    }
+
     // --- MÉRKŐZÉS TÖRLÉSE ---
     delete("/matches/{id}") {
         val matchId = call.parameters["id"]?.toIntOrNull() ?: return@delete call.respond(HttpStatusCode.BadRequest)
