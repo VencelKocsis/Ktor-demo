@@ -1,5 +1,6 @@
 package hu.bme.aut.android.demo.routes
 
+import hu.bme.aut.android.demo.database.tables.Rackets
 import hu.bme.aut.android.demo.database.tables.TeamMembers
 import hu.bme.aut.android.demo.database.tables.Users
 import hu.bme.aut.android.demo.model.*
@@ -75,11 +76,30 @@ fun Route.authRoutes(db: Database) {
                     val row = Users.select { Users.firebaseUid eq targetUid }.singleOrNull()
 
                     if (row != null) {
+                        val internalUserId = row[Users.id]
+
+                        val userRackets = Rackets.select {
+                            Rackets.userId eq internalUserId
+                        }.map { rRow ->
+                            RacketDTO(
+                                id = rRow[Rackets.id].value,
+                                bladeManufacturer = rRow[Rackets.bladeManufacturer],
+                                bladeModel = rRow[Rackets.bladeModel],
+                                fhRubberManufacturer = rRow[Rackets.fhRubberManufacturer],
+                                fhRubberModel = rRow[Rackets.fhRubberModel],
+                                fhRubberColor = rRow[Rackets.fhRubberColor],
+                                bhRubberManufacturer = rRow[Rackets.bhRubberManufacturer],
+                                bhRubberModel = rRow[Rackets.bhRubberModel],
+                                bhRubberColor = rRow[Rackets.bhRubberColor]
+                            )
+                        }
+
                         UserDTO(
                             id = row[Users.id].value,
                             email = row[Users.email],
                             firstName = row[Users.firstName],
-                            lastName = row[Users.lastName]
+                            lastName = row[Users.lastName],
+                            equipment = userRackets
                         )
                     } else {
                         null
@@ -138,9 +158,31 @@ fun Route.authRoutes(db: Database) {
                 }
                 if (rowsAffected > 0) {
                     val row = Users.select { Users.firebaseUid eq firebaseUid }.single()
+
+                    val internalUserId = row[Users.id]
+
+                    val userRackets = Rackets.select {
+                        Rackets.userId eq internalUserId
+                    }.map { rRow ->
+                        RacketDTO(
+                            id = rRow[Rackets.id].value,
+                            bladeManufacturer = rRow[Rackets.bladeManufacturer],
+                            bladeModel = rRow[Rackets.bladeModel],
+                            fhRubberManufacturer = rRow[Rackets.fhRubberManufacturer],
+                            fhRubberModel = rRow[Rackets.fhRubberModel],
+                            fhRubberColor = rRow[Rackets.fhRubberColor],
+                            bhRubberManufacturer = rRow[Rackets.bhRubberManufacturer],
+                            bhRubberModel = rRow[Rackets.bhRubberModel],
+                            bhRubberColor = rRow[Rackets.bhRubberColor]
+                        )
+                    }
+
                     UserDTO(
-                        id = row[Users.id].value, email = row[Users.email],
-                        firstName = row[Users.firstName], lastName = row[Users.lastName]
+                        id = row[Users.id].value,
+                        email = row[Users.email],
+                        firstName = row[Users.firstName],
+                        lastName = row[Users.lastName],
+                        equipment = userRackets
                     )
                 } else null
             }

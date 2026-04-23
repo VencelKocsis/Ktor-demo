@@ -58,7 +58,8 @@ data class UserDTO(
     val id: Int,
     val email: String,
     val firstName: String,
-    val lastName: String
+    val lastName: String,
+    val equipment: List<RacketDTO> = emptyList()
     // Jelszót soha nem küldünk ki DTO-ban!
 )
 
@@ -170,4 +171,17 @@ data class SendNotificationRequest(
     val targetEmail: String,
     val title: String,
     val body: String
+)
+
+@Serializable
+data class RacketDTO(
+    val id: Int? = null,
+    val bladeManufacturer: String,
+    val bladeModel: String,
+    val fhRubberManufacturer: String,
+    val fhRubberModel: String,
+    val fhRubberColor: String,
+    val bhRubberManufacturer: String,
+    val bhRubberModel: String,
+    val bhRubberColor: String
 )

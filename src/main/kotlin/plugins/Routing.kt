@@ -26,6 +26,7 @@ fun Application.configureRouting(
         matchRoutes(db, matchWsClients, json, applicationScope)
         notificationRoutes(db)
         authRoutes(db)
+        racketRoutes(db)
 
         staticResources("/", "static") { default("admin_dashboard.html") }
     }
