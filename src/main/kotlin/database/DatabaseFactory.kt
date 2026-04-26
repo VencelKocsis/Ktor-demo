@@ -32,7 +32,7 @@ object DatabaseFactory {
         transaction(db) {
             SchemaUtils.createMissingTablesAndColumns(
                 FcmTokens, Users, Clubs, Teams, TeamMembers, Seasons,
-                Matches, IndividualMatches, MatchParticipants
+                Matches, IndividualMatches, MatchParticipants, Rackets
             )
         }
 
