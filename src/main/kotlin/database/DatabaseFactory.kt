@@ -7,6 +7,7 @@ import hu.bme.aut.android.demo.database.tables.FcmTokens
 import hu.bme.aut.android.demo.database.tables.IndividualMatches
 import hu.bme.aut.android.demo.database.tables.MatchParticipants
 import hu.bme.aut.android.demo.database.tables.Matches
+import hu.bme.aut.android.demo.database.tables.Rackets
 import hu.bme.aut.android.demo.database.tables.Seasons
 import hu.bme.aut.android.demo.database.tables.TeamMembers
 import hu.bme.aut.android.demo.database.tables.Teams

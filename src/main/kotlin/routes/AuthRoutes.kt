@@ -136,9 +136,30 @@ fun Route.authRoutes(db: Database) {
                     }.value
                     UserDTO(id, newUserData.email, newUserData.firstName, newUserData.lastName)
                 } else {
+                    val internalUserId = existingUser[Users.id]
+
+                    val userRackets = Rackets.select {
+                        Rackets.userId eq internalUserId
+                    }.map { rRow ->
+                        RacketDTO(
+                            id = rRow[Rackets.id].value,
+                            bladeManufacturer = rRow[Rackets.bladeManufacturer],
+                            bladeModel = rRow[Rackets.bladeModel],
+                            fhRubberManufacturer = rRow[Rackets.fhRubberManufacturer],
+                            fhRubberModel = rRow[Rackets.fhRubberModel],
+                            fhRubberColor = rRow[Rackets.fhRubberColor],
+                            bhRubberManufacturer = rRow[Rackets.bhRubberManufacturer],
+                            bhRubberModel = rRow[Rackets.bhRubberModel],
+                            bhRubberColor = rRow[Rackets.bhRubberColor]
+                        )
+                    }
+
                     UserDTO(
-                        existingUser[Users.id].value, existingUser[Users.email],
-                        existingUser[Users.firstName], existingUser[Users.lastName]
+                        existingUser[Users.id].value,
+                        existingUser[Users.email],
+                        existingUser[Users.firstName],
+                        existingUser[Users.lastName],
+                        equipment = userRackets
                     )
                 }
             }
