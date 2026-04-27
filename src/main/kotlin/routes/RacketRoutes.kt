@@ -171,7 +171,8 @@ fun Route.racketRoutes(db: Database) {
                             "type" to "MARKET_INQUIRY",
                             "title" to "Érdeklődés felszerelésre!",
                             "body" to "$inquirerName érdeklődik a '$racketName' ütőd iránt!",
-                            "inquirerName" to inquirerName
+                            "inquirerName" to inquirerName,
+                            "racketName" to racketName
                         )
                     )
                     call.respond(HttpStatusCode.OK, mapOf("status" to "Notification sent"))
