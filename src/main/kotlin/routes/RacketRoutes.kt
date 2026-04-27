@@ -1,8 +1,11 @@
 package hu.bme.aut.android.demo.routes
 
+import hu.bme.aut.android.demo.database.tables.FcmTokens
 import hu.bme.aut.android.demo.database.tables.Rackets
 import hu.bme.aut.android.demo.database.tables.Users
+import hu.bme.aut.android.demo.model.MarketItemDTO
 import hu.bme.aut.android.demo.model.RacketDTO
+import hu.bme.aut.android.demo.service.FirebaseService
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
@@ -46,6 +49,7 @@ fun Route.racketRoutes(db: Database) {
                             it[bhRubberManufacturer] = dto.bhRubberManufacturer
                             it[bhRubberModel] = dto.bhRubberModel
                             it[bhRubberColor] = dto.bhRubberColor
+                            it[isForSale] = dto.isForSale
                         }
                     } else {
                         // HA VAN ID -> MEGLÉVŐ MÓDOSÍTÁSA
@@ -58,6 +62,7 @@ fun Route.racketRoutes(db: Database) {
                             it[bhRubberManufacturer] = dto.bhRubberManufacturer
                             it[bhRubberModel] = dto.bhRubberModel
                             it[bhRubberColor] = dto.bhRubberColor
+                            it[isForSale] = dto.isForSale
                         }
                     }
                 }
@@ -94,6 +99,87 @@ fun Route.racketRoutes(db: Database) {
 
             } catch (e: Exception) {
                 appLog.error("Hiba az ütő törlésekor: ${e.message}")
+                call.respond(HttpStatusCode.InternalServerError, "Szerver hiba")
+            }
+        }
+
+        // --- 2. PIAC LEKÉRDEZÉSE ---
+        get("/api/market/equipment") {
+            try {
+                val marketItems = transaction(db) {
+                    (Rackets innerJoin Users).select { Rackets.isForSale eq true }.map { row ->
+                        MarketItemDTO(
+                            racket = RacketDTO(
+                                id = row[Rackets.id].value,
+                                bladeManufacturer = row[Rackets.bladeManufacturer],
+                                bladeModel = row[Rackets.bladeModel],
+                                fhRubberManufacturer = row[Rackets.fhRubberManufacturer],
+                                fhRubberModel = row[Rackets.fhRubberModel],
+                                fhRubberColor = row[Rackets.fhRubberColor],
+                                bhRubberManufacturer = row[Rackets.bhRubberManufacturer],
+                                bhRubberModel = row[Rackets.bhRubberModel],
+                                bhRubberColor = row[Rackets.bhRubberColor],
+                                isForSale = true
+                            ),
+                            ownerName = "${row[Users.lastName]} ${row[Users.firstName]}",
+                            ownerId = row[Users.id].value
+                        )
+                    }
+                }
+                call.respond(HttpStatusCode.OK, marketItems)
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, "Szerver hiba")
+            }
+        }
+
+        // --- 3. ÉRDEKLŐDÉS KÜLDÉSE ---
+        post("/api/market/equipment/{id}/inquire") {
+            val principal = call.principal<UserIdPrincipal>()
+            val inquirerFirebaseUid = principal?.name ?: return@post call.respond(HttpStatusCode.Unauthorized)
+            val racketId = call.parameters["id"]?.toIntOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest)
+
+            try {
+                val notificationData = transaction(db) {
+                    val inquirerRow = Users.select { Users.firebaseUid eq inquirerFirebaseUid }.singleOrNull() ?: return@transaction null
+                    val inquirerName = "${inquirerRow[Users.lastName]} ${inquirerRow[Users.firstName]}"
+                    val inquirerEmail = inquirerRow[Users.email]
+
+                    val racketRow = Rackets.select { Rackets.id eq racketId }.singleOrNull() ?: return@transaction null
+                    val ownerId = racketRow[Rackets.userId]
+                    val racketName = "${racketRow[Rackets.bladeManufacturer]} ${racketRow[Rackets.bladeModel]}"
+
+                    val ownerRow = Users.select { Users.id eq ownerId }.singleOrNull() ?: return@transaction null
+                    val ownerEmail = ownerRow[Users.email]
+
+                    val ownerToken = FcmTokens.select { FcmTokens.userId eq ownerId }.singleOrNull()?.get(FcmTokens.token)
+
+                    if (ownerToken != null) {
+                        Triple(ownerEmail, ownerToken, Pair(inquirerName, racketName))
+                    } else null
+                }
+
+                if (notificationData != null) {
+                    val (ownerEmail, token, info) = notificationData
+                    val (inquirerName, racketName) = info
+
+                    // Push értesítés küldése a FirebaseService segítségével
+                    FirebaseService.sendNotification(
+                        db = db,
+                        email = ownerEmail,
+                        token = token,
+                        dataPayload = mapOf(
+                            "type" to "MARKET_INQUIRY",
+                            "title" to "Érdeklődés felszerelésre!",
+                            "body" to "$inquirerName érdeklődik a '$racketName' ütőd iránt!",
+                            "inquirerName" to inquirerName
+                        )
+                    )
+                    call.respond(HttpStatusCode.OK, mapOf("status" to "Notification sent"))
+                } else {
+                    // Ha a tulajnak nincs FCM tokenje, jelezzük
+                    call.respond(HttpStatusCode.NotFound, "A tulajdonos nem kaphat értesítést (nincs token).")
+                }
+            } catch (e: Exception) {
                 call.respond(HttpStatusCode.InternalServerError, "Szerver hiba")
             }
         }

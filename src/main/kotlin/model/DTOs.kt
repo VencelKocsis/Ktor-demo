@@ -183,5 +183,13 @@ data class RacketDTO(
     val fhRubberColor: String,
     val bhRubberManufacturer: String,
     val bhRubberModel: String,
-    val bhRubberColor: String
+    val bhRubberColor: String,
+    val isForSale: Boolean = false
+)
+
+@Serializable
+data class MarketItemDTO(
+    val racket: RacketDTO,
+    val ownerName: String,
+    val ownerId: Int
 )

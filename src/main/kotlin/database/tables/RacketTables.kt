@@ -15,4 +15,6 @@ object Rackets : IntIdTable("rackets") {
     val bhRubberManufacturer = varchar("bh_rubber_manufacturer", 100)
     val bhRubberModel = varchar("bh_rubber_model", 100)
     val bhRubberColor = varchar("bh_rubber_color", 50)
+
+    val isForSale = bool("is_for_sale").default(false)
 }
