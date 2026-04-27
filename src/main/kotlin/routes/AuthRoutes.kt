@@ -90,7 +90,8 @@ fun Route.authRoutes(db: Database) {
                                 fhRubberColor = rRow[Rackets.fhRubberColor],
                                 bhRubberManufacturer = rRow[Rackets.bhRubberManufacturer],
                                 bhRubberModel = rRow[Rackets.bhRubberModel],
-                                bhRubberColor = rRow[Rackets.bhRubberColor]
+                                bhRubberColor = rRow[Rackets.bhRubberColor],
+                                isForSale = rRow[Rackets.isForSale]
                             )
                         }
 
