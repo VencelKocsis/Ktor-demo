@@ -331,6 +331,25 @@ fun Route.matchRoutes(
 
     authenticate("firebase-auth") {
 
+        // --- CSAPATNÉV MÓDOSÍTÁSA MOBILRÓL ---
+        put("/teams/{id}/name") {
+            val teamId = call.parameters["id"]?.toIntOrNull()
+                ?: return@put call.respond(HttpStatusCode.BadRequest, "Érvénytelen csapat ID")
+
+            try {
+                val request = call.receive<MobileTeamNameUpdateDTO>()
+
+                transaction(db) {
+                    Teams.update({ Teams.id eq teamId }) {
+                        it[name] = request.name
+                    }
+                }
+                call.respond(HttpStatusCode.OK, mapOf("status" to "updated", "newName" to request.name))
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, "Hiba a név frissítésénél: ${e.message}")
+            }
+        }
+
         // --- JELENTKEZÉS A MECCSRE ---
         post("/matches/{matchId}/apply") {
             val principal = call.principal<UserIdPrincipal>()

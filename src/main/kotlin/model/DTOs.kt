@@ -29,6 +29,11 @@ data class TeamUpdateDTO(
 )
 
 @Serializable
+data class MobileTeamNameUpdateDTO(
+    val name: String
+)
+
+@Serializable
 data class ClubCreateDTO(
     val name: String,
     val address: String
