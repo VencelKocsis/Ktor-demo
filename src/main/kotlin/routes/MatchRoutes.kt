@@ -767,44 +767,41 @@ fun Route.matchRoutes(
                             val homeName = Teams.select { Teams.id eq homeTeamId }.single()[Teams.name]
                             val guestName = Teams.select { Teams.id eq guestTeamId }.single()[Teams.name]
 
-                            // Összes játékos kigyűjtése
                             val players = (TeamMembers innerJoin Users innerJoin FcmTokens)
                                 .slice(TeamMembers.teamId, Users.email, FcmTokens.token)
                                 .select { (TeamMembers.teamId eq homeTeamId) or (TeamMembers.teamId eq guestTeamId) }
-                                .map {
-                                    // Kimentjük: CsapatID, Email, Token
-                                    Triple(it[TeamMembers.teamId], it[Users.email], it[FcmTokens.token])
+                                .map { row ->
+                                    val isHome = (row[TeamMembers.teamId] == homeTeamId)
+
+                                    Triple(isHome, row[Users.email], row[FcmTokens.token])
                                 }
                                 .distinctBy { it.third }
 
-                            Triple(players, homeTeamId, Pair(homeName, guestName))
+                            Triple(players, Pair(homeName, guestName), Pair(finalHomeScore, finalGuestScore))
                         }
 
-                        val (players, homeTeamId, teamNames) = notificationsToSend
+                        val (players, teamNames, scores) = notificationsToSend
                         val (homeName, guestName) = teamNames
+                        val (hScore, gScore) = scores
 
-                        players.forEach { (playerTeamId, email, token) ->
-                            // 1. Kiszámoljuk, hogy az adott játékos nyert-e
-                            val isHomePlayer = (playerTeamId.toString() == homeTeamId.toString())
-                            val isWin = if (isHomePlayer) (finalHomeScore > finalGuestScore) else (finalGuestScore > finalHomeScore)
-                            val isDraw = (finalHomeScore == finalGuestScore)
-
+                        players.forEach { (isHomePlayer, email, token) ->
+                            val isWin = if (isHomePlayer) (hScore > gScore) else (gScore > hScore)
+                            val isDraw = (hScore == gScore)
                             val matchResult = if (isWin) "WIN" else if (isDraw) "DRAW" else "LOSS"
+                            println("FCM KÜLDÉS -> Email: $email | Hazai-e: $isHomePlayer | Eredmény: $matchResult")
 
-                            // 2. Csak nyers adatot (Data Payload) küldünk a telefonnak!
                             FirebaseService.sendNotification(
                                 db = db,
                                 email = email,
                                 token = token,
-                                // NINCS TITLE ÉS BODY, HISZEN A TELEFON FOGJA LEFORDÍTANI!
                                 dataPayload = mapOf(
                                     "type" to "MATCH_FINISHED",
                                     "matchId" to matchId.toString(),
                                     "result" to matchResult,
                                     "homeTeam" to homeName,
                                     "guestTeam" to guestName,
-                                    "homeScore" to finalHomeScore.toString(),
-                                    "guestScore" to finalGuestScore.toString()
+                                    "homeScore" to hScore.toString(),
+                                    "guestScore" to gScore.toString()
                                 )
                             )
                         }
