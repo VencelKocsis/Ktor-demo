@@ -785,7 +785,7 @@ fun Route.matchRoutes(
 
                         players.forEach { (playerTeamId, email, token) ->
                             // 1. Kiszámoljuk, hogy az adott játékos nyert-e
-                            val isHomePlayer = (playerTeamId == homeTeamId)
+                            val isHomePlayer = (playerTeamId.toString() == homeTeamId.toString())
                             val isWin = if (isHomePlayer) (finalHomeScore > finalGuestScore) else (finalGuestScore > finalHomeScore)
                             val isDraw = (finalHomeScore == finalGuestScore)
 
