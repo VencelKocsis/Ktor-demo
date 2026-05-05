@@ -12,6 +12,7 @@ import io.ktor.server.auth.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import kotlinx.coroutines.CoroutineScope
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
@@ -19,7 +20,10 @@ import org.slf4j.LoggerFactory
 
 private val appLog = LoggerFactory.getLogger("RacketRoutes")
 
-fun Route.racketRoutes(db: Database) {
+fun Route.racketRoutes(
+    db: Database,
+    applicationScope: CoroutineScope
+) {
 
     authenticate("firebase-auth") {
 
@@ -132,56 +136,62 @@ fun Route.racketRoutes(db: Database) {
             }
         }
 
-        // --- 3. ÉRDEKLŐDÉS KÜLDÉSE ---
+        // --- 3. ÉRDEKLŐDÉS KÜLDÉSE (Tiszta Data Payload alapú) ---
         post("/api/market/equipment/{id}/inquire") {
             val principal = call.principal<UserIdPrincipal>()
             val inquirerFirebaseUid = principal?.name ?: return@post call.respond(HttpStatusCode.Unauthorized)
             val racketId = call.parameters["id"]?.toIntOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest)
 
-            try {
-                val notificationData = transaction(db) {
-                    val inquirerRow = Users.select { Users.firebaseUid eq inquirerFirebaseUid }.singleOrNull() ?: return@transaction null
-                    val inquirerName = "${inquirerRow[Users.lastName]} ${inquirerRow[Users.firstName]}"
-                    val inquirerEmail = inquirerRow[Users.email]
+            // 1. Azonnal válaszolunk a kliensnek, hogy a kérés beérkezett
+            call.respond(HttpStatusCode.OK, mapOf("status" to "Inquiry processing started"))
 
-                    val racketRow = Rackets.select { Rackets.id eq racketId }.singleOrNull() ?: return@transaction null
-                    val ownerId = racketRow[Rackets.userId]
-                    val racketName = "${racketRow[Rackets.bladeManufacturer]} ${racketRow[Rackets.bladeModel]}"
+            // 2. A háttérben dolgozzuk fel és küldjük ki a Push értesítést
+            applicationScope.launch {
+                try {
+                    val notificationData = transaction(db) {
+                        val inquirerRow = Users.select { Users.firebaseUid eq inquirerFirebaseUid }.singleOrNull() ?: return@transaction null
+                        val inquirerName = "${inquirerRow[Users.lastName]} ${inquirerRow[Users.firstName]}"
+                        val inquirerEmail = inquirerRow[Users.email]
 
-                    val ownerRow = Users.select { Users.id eq ownerId }.singleOrNull() ?: return@transaction null
-                    val ownerEmail = ownerRow[Users.email]
+                        val racketRow = Rackets.select { Rackets.id eq racketId }.singleOrNull() ?: return@transaction null
+                        val ownerId = racketRow[Rackets.userId]
+                        val racketName = "${racketRow[Rackets.bladeManufacturer]} ${racketRow[Rackets.bladeModel]}"
 
-                    val ownerToken = FcmTokens.select { FcmTokens.userId eq ownerId }.singleOrNull()?.get(FcmTokens.token)
+                        val ownerRow = Users.select { Users.id eq ownerId }.singleOrNull() ?: return@transaction null
+                        val ownerEmail = ownerRow[Users.email]
 
-                    if (ownerToken != null) {
-                        Triple(ownerEmail, ownerToken, Pair(inquirerName, racketName))
-                    } else null
-                }
+                        val ownerToken = FcmTokens.select { FcmTokens.userId eq ownerId }.singleOrNull()?.get(FcmTokens.token)
 
-                if (notificationData != null) {
-                    val (ownerEmail, token, info) = notificationData
-                    val (inquirerName, racketName) = info
+                        if (ownerToken != null) {
+                            Triple(ownerEmail, ownerToken, mapOf(
+                                "inquirerName" to inquirerName,
+                                "inquirerEmail" to inquirerEmail,
+                                "racketName" to racketName
+                            ))
+                        } else null
+                    }
 
-                    // Push értesítés küldése a FirebaseService segítségével
-                    FirebaseService.sendNotification(
-                        db = db,
-                        email = ownerEmail,
-                        token = token,
-                        dataPayload = mapOf(
-                            "type" to "MARKET_INQUIRY",
-                            "title" to "Érdeklődés felszerelésre!",
-                            "body" to "$inquirerName érdeklődik a '$racketName' ütőd iránt!",
-                            "inquirerName" to inquirerName,
-                            "racketName" to racketName
+                    if (notificationData != null) {
+                        val (ownerEmail, token, payloadData) = notificationData
+
+                        // Csak nyers adatokat (Data Payload) küldünk!
+                        FirebaseService.sendNotification(
+                            db = db,
+                            email = ownerEmail,
+                            token = token,
+                            dataPayload = mapOf(
+                                "type" to "MARKET_INQUIRY",
+                                "inquirerName" to (payloadData["inquirerName"] ?: ""),
+                                "inquirerEmail" to (payloadData["inquirerEmail"] ?: ""),
+                                "racketName" to (payloadData["racketName"] ?: "")
+                            )
                         )
-                    )
-                    call.respond(HttpStatusCode.OK, mapOf("status" to "Notification sent"))
-                } else {
-                    // Ha a tulajnak nincs FCM tokenje, jelezzük
-                    call.respond(HttpStatusCode.NotFound, "A tulajdonos nem kaphat értesítést (nincs token).")
+                    } else {
+                        appLog.warn("Nem küldhető értesítés: a tulajdonosnak nincs FCM tokenje (Racket ID: $racketId).")
+                    }
+                } catch (e: Exception) {
+                    appLog.error("❌ Hiba a piaci érdeklődés értesítésénél: ${e.message}")
                 }
-            } catch (e: Exception) {
-                call.respond(HttpStatusCode.InternalServerError, "Szerver hiba")
             }
         }
     }
