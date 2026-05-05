@@ -22,7 +22,7 @@ fun Application.configureRouting(
 
     routing {
         // Publikus végpontok
-        clubAndTeamRoutes(db)
+        clubAndTeamRoutes(db, applicationScope)
         matchRoutes(db, matchWsClients, json, applicationScope)
         notificationRoutes(db)
         authRoutes(db)
